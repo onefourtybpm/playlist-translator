@@ -1,0 +1,16 @@
+# Local database (holds OAuth tokens)
+server/data/
+*.db
+*.db-wal
+*.db-shm
+
+# Secrets never belong in the repo
+*.env
+!server/dev.env
+*.p8
+
+# Frontend
+web/node_modules/
+web/dist/
+
+.DS_Store
