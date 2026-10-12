@@ -1,0 +1,10 @@
+[Unit]
+Description=Restart Playlist Translator when a deploy finishes
+
+[Path]
+# deploy.sh writes this file after uploading a new build, so deploys don't need sudo.
+PathChanged=/opt/playlist-translator/app/.deployed
+Unit=playlist-translator-restart.service
+
+[Install]
+WantedBy=multi-user.target

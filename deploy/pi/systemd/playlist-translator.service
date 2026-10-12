@@ -1,0 +1,45 @@
+[Unit]
+Description=Playlist Translator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=playlist
+Group=playlist
+# Secrets and BASE_URL. systemd reads this as root, so the service user never needs access to the file.
+EnvironmentFile=/etc/playlist-translator/env
+ExecStart=/opt/playlist-translator/app/playlist-translator \
+  -addr 127.0.0.1:8080 \
+  -db /var/lib/playlist-translator/playlist-translator.db \
+  -static /opt/playlist-translator/app/web
+Restart=on-failure
+RestartSec=5
+
+# Creates /var/lib/playlist-translator owned by the service user; the database lives there.
+StateDirectory=playlist-translator
+StateDirectoryMode=0700
+UMask=0077
+
+# Sandboxing: the process can write only to its state directory and can't gain privileges.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart Playlist Translator
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart playlist-translator.service

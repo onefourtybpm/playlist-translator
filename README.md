@@ -38,6 +38,18 @@ Tests:
 cd server && go test ./...
 ```
 
+## Deploying to the Raspberry Pi
+
+The app runs on a Raspberry Pi at https://playlist-translator-pi.tail5b17c8.ts.net (Tailscale Funnel).
+To build and deploy:
+
+```bash
+deploy/pi/deploy.sh
+```
+
+The one-time Pi setup scripts and systemd units are in `deploy/pi/`. Setup notes are in
+`../playlist-translator-notes/pi-setup.md`.
+
 ## Server flags and settings
 
 | Flag / variable | Default | Purpose |
