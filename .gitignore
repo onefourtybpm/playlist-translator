@@ -12,5 +12,9 @@ server/data/
 # Frontend
 web/node_modules/
 web/dist/
+*.tsbuildinfo
 
 .DS_Store
+
+# Self-signed dev certificate (temporary Apple sign-in test)
+web/.cert/
