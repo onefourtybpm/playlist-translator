@@ -89,6 +89,14 @@ a {
   color: var(--text);
 }
 
+.topbar-account .signed-in-spotify {
+  color: var(--spotify);
+}
+
+.topbar-account .signed-in-apple {
+  color: var(--apple);
+}
+
 .card {
   background: var(--surface);
   border: 1px solid var(--border);

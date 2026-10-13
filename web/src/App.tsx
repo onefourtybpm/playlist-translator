@@ -64,7 +64,10 @@ export default function App() {
         <h1>Playlist Translator</h1>
         {me?.member && (
           <div className="topbar-account">
-            <strong>{me.member.displayName}</strong>
+            {/* In the color of the service they sign in with (Spotify if they use both). */}
+            <strong className={me.member.signsInWithSpotify ? 'signed-in-spotify' : 'signed-in-apple'}>
+              {me.member.displayName}
+            </strong>
             {me.member.isAdmin && (
               <a
                 className="link-button"
