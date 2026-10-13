@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/onefourtybpm/playlist-translator/server/internal/apple"
 	"github.com/onefourtybpm/playlist-translator/server/internal/spotify"
 	"github.com/onefourtybpm/playlist-translator/server/internal/store"
 )
@@ -33,6 +34,11 @@ type config struct {
 
 	SpotifyClientID     string
 	SpotifyClientSecret string
+
+	// Apple MusicKit credentials. Optional: without them the Apple Music features are disabled.
+	AppleTeamID  string
+	AppleKeyID   string
+	AppleKeyPath string
 }
 
 func main() {
@@ -61,10 +67,24 @@ func run() error {
 
 	cfg.SpotifyClientID = os.Getenv("SPOTIFY_CLIENT_ID")
 	cfg.SpotifyClientSecret = os.Getenv("SPOTIFY_CLIENT_SECRET")
+	cfg.AppleTeamID = os.Getenv("APPLE_TEAM_ID")
+	cfg.AppleKeyID = os.Getenv("APPLE_KEY_ID")
+	cfg.AppleKeyPath = os.Getenv("APPLE_PRIVATE_KEY_PATH")
 	cfg.BaseURL = strings.TrimRight(envOr("BASE_URL", "http://"+cfg.Addr), "/")
 	cfg.AppURL = strings.TrimRight(envOr("APP_URL", cfg.BaseURL), "/")
 	if cfg.SpotifyClientID == "" || cfg.SpotifyClientSecret == "" {
 		return errors.New("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set (pass -env with the path to your credentials file)")
+	}
+
+	var appleTokens *apple.TokenSigner
+	if cfg.AppleTeamID != "" || cfg.AppleKeyID != "" || cfg.AppleKeyPath != "" {
+		var err error
+		appleTokens, err = apple.LoadTokenSigner(cfg.AppleTeamID, cfg.AppleKeyID, cfg.AppleKeyPath)
+		if err != nil {
+			return fmt.Errorf("APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY_PATH: %w", err)
+		}
+	} else {
+		slog.Warn("Apple Music is disabled: APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY_PATH aren't set")
 	}
 
 	db, err := store.Open(cfg.DBPath)
@@ -77,6 +97,8 @@ func run() error {
 		cfg:     cfg,
 		store:   db,
 		spotify: spotify.NewClient(cfg.SpotifyClientID, cfg.SpotifyClientSecret, cfg.BaseURL+"/callback"),
+
+		appleTokens: appleTokens,
 	}
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,

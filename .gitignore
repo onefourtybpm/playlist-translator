@@ -16,5 +16,5 @@ web/dist/
 
 .DS_Store
 
-# Self-signed dev certificate (temporary Apple sign-in test)
+# Self-signed certificate for the https dev server (Apple Music sign-in needs https)
 web/.cert/

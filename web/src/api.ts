@@ -80,6 +80,7 @@ export const api = {
     }),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
   disconnect: () => request<void>('/api/spotify/account', { method: 'DELETE' }),
+  appleDeveloperToken: () => request<{ token: string }>('/api/apple/developer-token'),
 }
 
 // Full-page navigation, not fetch: the server redirects the browser to Spotify's sign-in page.

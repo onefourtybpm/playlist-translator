@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/onefourtybpm/playlist-translator/server/internal/apple"
 	"github.com/onefourtybpm/playlist-translator/server/internal/spotify"
 	"github.com/onefourtybpm/playlist-translator/server/internal/store"
 )
@@ -30,6 +31,9 @@ type server struct {
 	cfg     config
 	store   *store.Store
 	spotify *spotify.Client
+
+	// appleTokens is nil when Apple Music isn't configured.
+	appleTokens *apple.TokenSigner
 
 	// refreshMu serializes token refreshes so two requests don't refresh the same account at once.
 	refreshMu sync.Mutex
@@ -46,6 +50,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/spotify/accounts", s.requireSession(s.handleListAccounts))
 	mux.HandleFunc("DELETE /api/spotify/account", s.requireSession(s.handleDisconnect))
 	mux.HandleFunc("POST /api/spotify/playlist", s.requireSession(s.handleReadPlaylist))
+	mux.HandleFunc("GET /api/apple/developer-token", s.requireSession(s.handleAppleDeveloperToken))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Not found.")
 	})
@@ -272,6 +277,23 @@ func (s *server) handleReadPlaylist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+// handleAppleDeveloperToken gives the browser a developer token so MusicKit JS can ask the user
+// to connect their Apple Music account.
+func (s *server) handleAppleDeveloperToken(w http.ResponseWriter, r *http.Request) {
+	if s.appleTokens == nil {
+		writeError(w, http.StatusServiceUnavailable, "Apple Music isn't set up on this server.")
+		return
+	}
+	token, err := s.appleTokens.Token()
+	if err != nil {
+		slog.Error("sign apple developer token", "err", err)
+		writeError(w, http.StatusInternalServerError, "Couldn't start connecting to Apple Music.")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
 // userError is an error whose message is safe and useful to show in the UI.
