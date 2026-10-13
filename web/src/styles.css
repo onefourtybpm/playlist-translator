@@ -354,9 +354,11 @@ a {
   gap: 8px;
 }
 
+/* Spotify accounts whose playlists can be translated, in Spotify green. The name stays in the
+   text color, since green text is hard to read on the light background. */
 .chip {
-  border: 1px solid var(--border);
-  background: var(--surface);
+  border: 1px solid var(--spotify);
+  background: color-mix(in srgb, var(--spotify) 14%, var(--surface));
   border-radius: 999px;
   padding: 2px 12px;
 }
