@@ -262,7 +262,7 @@ function SpotifyConnection({
       )}
       {!signsInWithSpotify ? null : spotify ? (
         <p className="spotify-status">
-          <span className="spotify-dot" aria-hidden="true" /> Your Spotify ({spotify.displayName}) is connected.{' '}
+          <span className="spotify-dot" aria-hidden="true" /> Your Spotify (<strong className="spotify-name">{spotify.displayName}</strong>) is connected.{' '}
           <button className="link-button" onClick={disconnect}>
             Disconnect
           </button>
