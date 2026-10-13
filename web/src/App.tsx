@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { api, spotifyLoginUrl, type Account, type Me } from './api'
-import PlaylistReader from './PlaylistReader'
+import { api, spotifyLoginUrl, type Account, type AppleStatus, type Me } from './api'
+import AppleConnection from './AppleConnection'
+import Translator from './Translator'
 
 // The server reports sign-in failures by redirecting back with ?error=...; read it once and
 // tidy the URL so a refresh doesn't show it again.
@@ -71,10 +72,7 @@ export default function App() {
       {me === null ? (
         <p className="muted">Loading…</p>
       ) : me.spotify ? (
-        <>
-          <ConnectedAccounts />
-          <PlaylistReader />
-        </>
+        <SignedIn />
       ) : (
         <SignIn />
       )}
@@ -94,6 +92,28 @@ function SignIn() {
         Connect Spotify
       </a>
     </section>
+  )
+}
+
+function SignedIn() {
+  const [apple, setApple] = useState<AppleStatus | null>(null)
+  const [appleError, setAppleError] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.appleStatus().then(setApple, (e: Error) => setAppleError(e.message))
+  }, [])
+
+  return (
+    <>
+      <ConnectedAccounts />
+      {apple && <AppleConnection status={apple} onChange={setApple} />}
+      {appleError && (
+        <p className="form-error" role="alert">
+          {appleError}
+        </p>
+      )}
+      <Translator apple={apple ?? { configured: false, connected: false, canManage: false }} />
+    </>
   )
 }
 

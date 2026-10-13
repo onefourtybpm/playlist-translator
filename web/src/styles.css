@@ -7,6 +7,7 @@
   --accent: #1c1c1e;
   --accent-text: #ffffff;
   --spotify: #1db954;
+  --apple: #fa2d48;
   --danger: #c0392b;
   --warn: #a66300;
   --error-bg: #fdecea;
@@ -138,6 +139,17 @@ a {
 .button.spotify {
   background: var(--spotify);
   color: #000;
+}
+
+.button.apple-button {
+  background: var(--apple);
+  color: #fff;
+}
+
+.button.secondary {
+  background: none;
+  color: var(--text);
+  border: 1px solid var(--border);
 }
 
 .link-button {
@@ -306,6 +318,113 @@ th {
 .skipped ul {
   margin: 0;
   padding-left: 20px;
+}
+
+.small {
+  font-size: 0.85rem;
+}
+
+.apple-row p {
+  margin: 0 0 8px;
+  max-width: 70ch;
+}
+
+.apple-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--apple);
+  vertical-align: 1px;
+}
+
+.apple-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 12px;
+}
+
+.notice {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+
+.create-bar {
+  margin-bottom: 16px;
+}
+
+.create-bar p {
+  margin: 0;
+}
+
+.created {
+  border: 1px solid var(--apple);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.created h3 {
+  font-size: 1.05rem;
+}
+
+.created p {
+  margin: 8px 0;
+}
+
+.share-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.share-link {
+  flex: 1 1 260px;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.matches td:nth-child(2),
+.matches td:nth-child(3) {
+  width: 50%;
+}
+
+.match {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.match input {
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.match > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.tag {
+  margin-left: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+tr.unmatched td {
+  background: color-mix(in srgb, var(--warn) 6%, transparent);
 }
 
 @media (max-width: 600px) {

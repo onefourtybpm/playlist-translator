@@ -32,11 +32,13 @@ type server struct {
 	store   *store.Store
 	spotify *spotify.Client
 
-	// appleTokens is nil when Apple Music isn't configured.
-	appleTokens *apple.TokenSigner
+	// apple is nil when Apple Music isn't configured.
+	apple *apple.Client
 
 	// refreshMu serializes token refreshes so two requests don't refresh the same account at once.
 	refreshMu sync.Mutex
+	// createMu serializes Apple playlist creation.
+	createMu sync.Mutex
 }
 
 func (s *server) routes() http.Handler {
@@ -50,7 +52,12 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /api/spotify/accounts", s.requireSession(s.handleListAccounts))
 	mux.HandleFunc("DELETE /api/spotify/account", s.requireSession(s.handleDisconnect))
 	mux.HandleFunc("POST /api/spotify/playlist", s.requireSession(s.handleReadPlaylist))
+	mux.HandleFunc("GET /api/apple", s.requireSession(s.handleAppleStatus))
 	mux.HandleFunc("GET /api/apple/developer-token", s.requireSession(s.handleAppleDeveloperToken))
+	mux.HandleFunc("PUT /api/apple/connection", s.requireSession(s.handleAppleConnect))
+	mux.HandleFunc("DELETE /api/apple/connection", s.requireSession(s.handleAppleDisconnect))
+	mux.HandleFunc("POST /api/translate/preview", s.requireSession(s.handlePreview))
+	mux.HandleFunc("POST /api/translate", s.requireSession(s.handleCreate))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Not found.")
 	})
@@ -252,48 +259,16 @@ func (s *server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleReadPlaylist(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Link string `json:"link"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Send a playlist link.")
+	playlistID, ok := decodeLink(w, r)
+	if !ok {
 		return
 	}
-	playlistID, err := spotify.ParsePlaylistID(req.Link)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, capitalize(err.Error())+".")
-		return
-	}
-
 	result, err := s.readPlaylist(r.Context(), sessionFrom(r.Context()).SpotifyUserID, playlistID)
 	if err != nil {
-		var ue *userError
-		if errors.As(err, &ue) {
-			writeError(w, ue.status, ue.message)
-			return
-		}
-		slog.Error("read playlist", "playlist", playlistID, "err", err)
-		writeError(w, http.StatusBadGateway, "Something went wrong talking to Spotify. Please try again.")
+		s.writeSpotifyError(w, playlistID, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
-}
-
-// handleAppleDeveloperToken gives the browser a developer token so MusicKit JS can ask the user
-// to connect their Apple Music account.
-func (s *server) handleAppleDeveloperToken(w http.ResponseWriter, r *http.Request) {
-	if s.appleTokens == nil {
-		writeError(w, http.StatusServiceUnavailable, "Apple Music isn't set up on this server.")
-		return
-	}
-	token, err := s.appleTokens.Token()
-	if err != nil {
-		slog.Error("sign apple developer token", "err", err)
-		writeError(w, http.StatusInternalServerError, "Couldn't start connecting to Apple Music.")
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
 // userError is an error whose message is safe and useful to show in the UI.

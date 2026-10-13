@@ -76,13 +76,13 @@ func run() error {
 		return errors.New("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set (pass -env with the path to your credentials file)")
 	}
 
-	var appleTokens *apple.TokenSigner
+	var appleClient *apple.Client
 	if cfg.AppleTeamID != "" || cfg.AppleKeyID != "" || cfg.AppleKeyPath != "" {
-		var err error
-		appleTokens, err = apple.LoadTokenSigner(cfg.AppleTeamID, cfg.AppleKeyID, cfg.AppleKeyPath)
+		tokens, err := apple.LoadTokenSigner(cfg.AppleTeamID, cfg.AppleKeyID, cfg.AppleKeyPath)
 		if err != nil {
 			return fmt.Errorf("APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY_PATH: %w", err)
 		}
+		appleClient = apple.NewClient(tokens)
 	} else {
 		slog.Warn("Apple Music is disabled: APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY_PATH aren't set")
 	}
@@ -98,7 +98,7 @@ func run() error {
 		store:   db,
 		spotify: spotify.NewClient(cfg.SpotifyClientID, cfg.SpotifyClientSecret, cfg.BaseURL+"/callback"),
 
-		appleTokens: appleTokens,
+		apple: appleClient,
 	}
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,

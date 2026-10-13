@@ -35,7 +35,7 @@
         "web/vite.https.config.ts"
       ],
       "port": 5174,
-      "url": "https://localhost:5174"
+      "url": "https://127.0.0.1:5174"
     }
   ]
 }

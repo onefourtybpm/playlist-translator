@@ -34,6 +34,29 @@ CREATE TABLE IF NOT EXISTS spotify_accounts (
 	updated_at       INTEGER NOT NULL
 );
 
+-- The one Apple Music account translated playlists are created in. connected_by is the Spotify
+-- user who connected it; only they can replace or disconnect it.
+CREATE TABLE IF NOT EXISTS apple_account (
+	id               INTEGER PRIMARY KEY CHECK (id = 1),
+	music_user_token TEXT NOT NULL,
+	storefront       TEXT NOT NULL,
+	connected_by     TEXT NOT NULL,
+	connected_at     INTEGER NOT NULL,
+	folder_id        TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS translations (
+	id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+	spotify_playlist_id TEXT NOT NULL,
+	name                TEXT NOT NULL,
+	apple_playlist_id   TEXT NOT NULL,
+	share_url           TEXT NOT NULL,
+	song_count          INTEGER NOT NULL,
+	created_by          TEXT NOT NULL,
+	created_at          INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS translations_by_playlist ON translations (spotify_playlist_id, created_at);
+
 CREATE TABLE IF NOT EXISTS sessions (
 	token_hash      TEXT PRIMARY KEY,
 	spotify_user_id TEXT REFERENCES spotify_accounts(spotify_user_id) ON DELETE CASCADE,
@@ -199,4 +222,93 @@ func (s *Store) DeleteSession(ctx context.Context, token string) error {
 func hashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+type AppleAccount struct {
+	MusicUserToken string
+	Storefront     string
+	ConnectedBy    string // Spotify user ID
+	ConnectedAt    time.Time
+	FolderID       string
+}
+
+// GetAppleAccount returns the connected Apple Music account, or ErrNotFound.
+func (s *Store) GetAppleAccount(ctx context.Context) (AppleAccount, error) {
+	var a AppleAccount
+	var connected int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT music_user_token, storefront, connected_by, connected_at, folder_id
+		FROM apple_account WHERE id = 1`).
+		Scan(&a.MusicUserToken, &a.Storefront, &a.ConnectedBy, &connected, &a.FolderID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return a, ErrNotFound
+	}
+	a.ConnectedAt = time.Unix(connected, 0)
+	return a, err
+}
+
+// SetAppleAccount connects (or reconnects) the Apple Music account. Reconnecting keeps the
+// playlist folder, since it's in the same library.
+func (s *Store) SetAppleAccount(ctx context.Context, a AppleAccount) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO apple_account (id, music_user_token, storefront, connected_by, connected_at)
+		VALUES (1, ?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET
+			music_user_token = excluded.music_user_token,
+			storefront       = excluded.storefront,
+			connected_by     = excluded.connected_by,
+			connected_at     = excluded.connected_at`,
+		a.MusicUserToken, a.Storefront, a.ConnectedBy, a.ConnectedAt.Unix())
+	return err
+}
+
+func (s *Store) SetAppleFolder(ctx context.Context, folderID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE apple_account SET folder_id = ? WHERE id = 1`, folderID)
+	return err
+}
+
+func (s *Store) DeleteAppleAccount(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM apple_account`)
+	return err
+}
+
+type Translation struct {
+	SpotifyPlaylistID string
+	Name              string
+	ApplePlaylistID   string
+	ShareURL          string
+	SongCount         int
+	CreatedBy         string // Spotify user ID
+	CreatedAt         time.Time
+}
+
+func (s *Store) AddTranslation(ctx context.Context, t Translation) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO translations
+			(spotify_playlist_id, name, apple_playlist_id, share_url, song_count, created_by, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		t.SpotifyPlaylistID, t.Name, t.ApplePlaylistID, t.ShareURL, t.SongCount, t.CreatedBy, t.CreatedAt.Unix())
+	return err
+}
+
+// TranslationsOf lists earlier translations of a Spotify playlist, newest first.
+func (s *Store) TranslationsOf(ctx context.Context, spotifyPlaylistID string) ([]Translation, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT spotify_playlist_id, name, apple_playlist_id, share_url, song_count, created_by, created_at
+		FROM translations WHERE spotify_playlist_id = ? ORDER BY created_at DESC, id DESC`, spotifyPlaylistID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Translation
+	for rows.Next() {
+		var t Translation
+		var created int64
+		if err := rows.Scan(&t.SpotifyPlaylistID, &t.Name, &t.ApplePlaylistID, &t.ShareURL, &t.SongCount, &t.CreatedBy, &created); err != nil {
+			return nil, err
+		}
+		t.CreatedAt = time.Unix(created, 0)
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }

@@ -35,11 +35,55 @@ export type SkippedItem = {
   reason: string
 }
 
-export type PlaylistResult = {
+export type AppleStatus = {
+  configured: boolean
+  connected: boolean
+  storefront?: string
+  connectedBy?: Account
+  connectedAt?: string
+  reconnectBy?: string
+  canManage: boolean
+}
+
+export type AppleSong = {
+  id: string
+  name: string
+  artist: string
+  album: string
+  durationMs: number
+  explicit: boolean
+  isrc: string
+  url: string
+}
+
+export type MatchResult = {
+  track: Track
+  song: AppleSong | null
+  // 'isrc': same recording. 'search': same title and artist, found by search.
+  method?: 'isrc' | 'search'
+}
+
+export type Translation = {
+  name: string
+  shareUrl: string
+  songCount: number
+  createdBy: Account
+  createdAt: string
+}
+
+export type Preview = {
   playlist: Playlist
   readWith: Account
-  tracks: Track[]
+  results: MatchResult[]
   skipped: SkippedItem[]
+  storefront: string
+  previous: Translation[]
+}
+
+export type Created = {
+  name: string
+  shareUrl: string
+  songCount: number
 }
 
 export class ApiError extends Error {
@@ -73,10 +117,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   me: () => request<Me>('/api/me'),
   accounts: () => request<Account[]>('/api/spotify/accounts'),
-  readPlaylist: (link: string) =>
-    request<PlaylistResult>('/api/spotify/playlist', {
+  appleStatus: () => request<AppleStatus>('/api/apple'),
+  appleConnect: (musicUserToken: string) =>
+    request<AppleStatus>('/api/apple/connection', {
+      method: 'PUT',
+      body: JSON.stringify({ musicUserToken }),
+    }),
+  appleDisconnect: () => request<void>('/api/apple/connection', { method: 'DELETE' }),
+  preview: (link: string) =>
+    request<Preview>('/api/translate/preview', {
       method: 'POST',
       body: JSON.stringify({ link }),
+    }),
+  create: (link: string, songIds: string[]) =>
+    request<Created>('/api/translate', {
+      method: 'POST',
+      body: JSON.stringify({ link, songIds }),
     }),
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
   disconnect: () => request<void>('/api/spotify/account', { method: 'DELETE' }),
