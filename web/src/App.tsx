@@ -131,7 +131,7 @@ function ConnectedAccounts() {
   if (!accounts) return null
   return (
     <section className="connected">
-      <span className="muted">Connected Spotify accounts:</span>
+      <span className="muted">Playlists can be translated from:</span>
       {accounts.map((a) => (
         <span key={a.id} className="chip">
           {a.displayName}
