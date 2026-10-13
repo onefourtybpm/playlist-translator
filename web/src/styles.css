@@ -7,7 +7,8 @@
   --accent: #1c1c1e;
   --accent-text: #ffffff;
   --spotify: #1db954;
-  --apple: #fa2d48;
+  /* Apple Music's own key color on music.apple.com: deeper red in light mode, lighter in dark. */
+  --apple: #d60017;
   --danger: #c0392b;
   --warn: #a66300;
   --error-bg: #fdecea;
@@ -32,6 +33,7 @@
     --danger: #ff6b5e;
     --warn: #f0b04a;
     --error-bg: #3a1d1a;
+    --apple: #fa586a;
     color-scheme: dark;
   }
 }
@@ -268,6 +270,10 @@ a {
 
 .spotify-name {
   color: var(--spotify);
+}
+
+.apple-name {
+  color: var(--apple);
 }
 
 .spotify-dot {

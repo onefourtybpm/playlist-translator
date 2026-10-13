@@ -83,7 +83,7 @@ export default function AppleConnection({ status, onChange }: Props) {
         <div className="apple-row">
           <p>
             <span className="apple-dot" aria-hidden="true" /> Playlists are created in{' '}
-            <strong>{status.connectedBy?.displayName}</strong>’s Apple Music
+            <strong className="apple-name">{status.connectedBy?.displayName}</strong>’s Apple Music
             {status.storefront && <span className="muted"> ({status.storefront.toUpperCase()})</span>}, as
             public playlists in a “Playlist Translator” folder.
           </p>
