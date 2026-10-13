@@ -114,9 +114,9 @@ function PreviewView({ link, preview, apple }: { link: string; preview: Preview;
             )}
           </h2>
           <p className="muted">
-            By {playlist.owner.display_name}
-            {playlist.collaborative && ' · collaborative'} · read using {readWith.displayName}'s
-            connection
+            By <strong className="spotify-name">{playlist.owner.display_name}</strong>
+            {playlist.collaborative && ' · collaborative'} · read using{' '}
+            <strong className="spotify-name">{readWith.displayName}</strong>'s connection
           </p>
           <ul className="stats">
             <li>
