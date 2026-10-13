@@ -40,7 +40,7 @@ export default function Translator({ apple }: { apple: AppleStatus }) {
               autoComplete="off"
               spellCheck={false}
             />
-            <button className="button" type="submit" disabled={loading || !link.trim()}>
+            <button className="button spotify" type="submit" disabled={loading || !link.trim()}>
               {loading ? 'Matching songs…' : 'Preview'}
             </button>
           </div>
