@@ -313,3 +313,38 @@ func TestSpotifySignInLinksAppleMember(t *testing.T) {
 		t.Errorf("new member = %+v, %v", m, err)
 	}
 }
+
+func TestAppleMemberCanSwitchAppleMusic(t *testing.T) {
+	srv := newTestServer(t, newFakeSpotify(t, nil), account("admin", time.Hour), account("bob", time.Hour))
+	_, srv.apple = newFakeApple(t)
+	ctx := context.Background()
+	if code := call(t, srv, "admin", "PUT", "/api/apple/connection", `{"musicUserToken":"good"}`, nil); code != http.StatusOK {
+		t.Fatalf("admin connects: %d", code)
+	}
+	friend, _ := srv.store.CreateMember(ctx, storeMember("Friend", "", "sub-friend"))
+	friendSession, _ := srv.store.CreateSession(ctx, friend.ID, time.Hour)
+
+	// Bob signs in with Spotify only: he can't take over the connection.
+	var status appleStatusJSON
+	if call(t, srv, "bob", "GET", "/api/apple", "", &status); status.CanManage || status.CanSwitch {
+		t.Errorf("bob: %+v", status)
+	}
+	if code := call(t, srv, "bob", "PUT", "/api/apple/connection", `{"musicUserToken":"friend"}`, nil); code != http.StatusForbidden {
+		t.Errorf("bob switching: %d", code)
+	}
+
+	// The friend signs in with Apple, so they may switch it to their own Apple Music.
+	if apiAs(t, srv, friendSession, "GET", "/api/apple", "", &status); status.CanManage || !status.CanSwitch {
+		t.Fatalf("friend before switching: %+v", status)
+	}
+	if code := apiAs(t, srv, friendSession, "PUT", "/api/apple/connection", `{"musicUserToken":"friend"}`, &status); code != http.StatusOK {
+		t.Fatalf("friend switching: %d", code)
+	}
+	if !status.CanManage || status.CanSwitch || status.ConnectedBy.DisplayName != "Friend" {
+		t.Errorf("friend after switching: %+v", status)
+	}
+	// Now the admin, who signs in with Spotify, can't change it back.
+	if code := call(t, srv, "admin", "DELETE", "/api/apple/connection", "", nil); code != http.StatusForbidden {
+		t.Errorf("admin disconnecting the friend's account: %d", code)
+	}
+}

@@ -333,6 +333,11 @@ type memberJSON struct {
 	ID          int64  `json:"id"`
 	DisplayName string `json:"displayName"`
 	IsAdmin     bool   `json:"isAdmin"`
+	// SignsInWithSpotify and SignsInWithApple say how this member gets in.
+	SignsInWithSpotify bool `json:"signsInWithSpotify"`
+	SignsInWithApple   bool `json:"signsInWithApple"`
+	// PendingRequests counts people asking to join; only sent to the admin.
+	PendingRequests int `json:"pendingRequests,omitempty"`
 }
 
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -343,7 +348,15 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		SignInWithApple bool         `json:"signInWithApple"`
 	}{SignInWithApple: s.appleID != nil}
 	if m, ok := s.currentMember(r); ok {
-		resp.Member = &memberJSON{ID: m.ID, DisplayName: m.DisplayName, IsAdmin: m.IsAdmin}
+		resp.Member = &memberJSON{
+			ID: m.ID, DisplayName: m.DisplayName, IsAdmin: m.IsAdmin,
+			SignsInWithSpotify: m.SpotifyUserID != "", SignsInWithApple: m.AppleSub != "",
+		}
+		if m.IsAdmin {
+			if reqs, err := s.store.ListAccessRequests(r.Context()); err == nil {
+				resp.Member.PendingRequests = len(reqs)
+			}
+		}
 		if m.SpotifyUserID != "" {
 			if acct, err := s.store.GetSpotifyAccount(r.Context(), m.SpotifyUserID); err == nil {
 				resp.Spotify = &accountJSON{ID: acct.UserID, DisplayName: acct.DisplayName}

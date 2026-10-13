@@ -11,18 +11,21 @@ type Props = {
 }
 
 // AppleConnection shows which Apple Music account playlists are created in, and lets the person
-// who manages it connect, reconnect, or disconnect it.
+// who manages it connect, reconnect, or disconnect it. Members who sign in with Apple can switch
+// it to their own Apple Music.
 export default function AppleConnection({ status, onChange }: Props) {
   const [music, setMusic] = useState<MusicKitInstance | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [switching, setSwitching] = useState(false)
+  const canConnect = status.canManage || status.canSwitch
 
   // Load MusicKit up front for whoever can connect: Safari only allows Apple's sign-in popup when
   // it opens straight from the click, with no loading in between.
   useEffect(() => {
-    if (!status.configured || !status.canManage) return
+    if (!status.configured || !canConnect) return
     getMusicKit().then(setMusic, (e: Error) => setError(e.message))
-  }, [status.configured, status.canManage])
+  }, [status.configured, canConnect])
 
   if (!status.configured) {
     return (
@@ -40,7 +43,10 @@ export default function AppleConnection({ status, onChange }: Props) {
     setError(null)
     authorizing
       .then((token) => api.appleConnect(token))
-      .then(onChange)
+      .then((s) => {
+        setSwitching(false)
+        onChange(s)
+      })
       .catch(async (e) => {
         setError(describe(e))
         // A stale sign-in remembered by this browser would be offered again; forget it so the
@@ -81,7 +87,7 @@ export default function AppleConnection({ status, onChange }: Props) {
             {status.storefront && <span className="muted"> ({status.storefront.toUpperCase()})</span>}, as
             public playlists in a “Playlist Translator” folder.
           </p>
-          {reconnectBy && (
+          {reconnectBy && status.canManage && (
             <p className={reconnectSoon ? 'warn' : 'muted'}>
               Apple’s connection lasts about six months; reconnect by {formatDate(reconnectBy)}.
             </p>
@@ -96,6 +102,31 @@ export default function AppleConnection({ status, onChange }: Props) {
               </button>
             </div>
           )}
+          {status.canSwitch &&
+            (switching ? (
+              <div className="switch-apple">
+                <p>
+                  New playlists will go in your Apple Music library instead, in a new “Playlist Translator”
+                  folder, and you’ll manage the connection. Playlists already made stay in{' '}
+                  {status.connectedBy?.displayName}’s library, and their links keep working.
+                </p>
+                <div className="apple-actions">
+                  {/* Opens Apple's sign-in straight from this click, or Safari blocks the popup. */}
+                  <button className="button apple-button" onClick={connect} disabled={busy || !music}>
+                    {music ? 'Switch to my Apple Music' : 'Loading…'}
+                  </button>
+                  <button className="link-button" onClick={() => setSwitching(false)} disabled={busy}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="apple-actions">
+                <button className="link-button" onClick={() => setSwitching(true)}>
+                  Use my Apple Music instead
+                </button>
+              </div>
+            ))}
         </div>
       ) : (
         <div className="apple-row">

@@ -3,20 +3,30 @@ import { api, type AccessRequest, type AdminView } from './api'
 
 // Admin is the admin's view of who can use the app: people waiting to be let in, emails allowed
 // to sign in with Apple, and current members.
-export default function Admin() {
+export default function Admin({ onRequestsChange }: { onRequestsChange: (count: number) => void }) {
   const [view, setView] = useState<AdminView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  function show(v: AdminView) {
+    setView(v)
+    onRequestsChange(v.requests.length)
+  }
+
+  // Reload whenever the page comes back into view: people sign in and ask to join elsewhere.
   useEffect(() => {
-    api.admin().then(setView, (e: Error) => setError(e.message))
+    const load = () => api.admin().then(show, (e: Error) => setError(e.message))
+    load()
+    const onVisible = () => document.visibilityState === 'visible' && load()
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
   }, [])
 
   async function run(action: () => Promise<AdminView>): Promise<boolean> {
     setBusy(true)
     setError(null)
     try {
-      setView(await action())
+      show(await action())
       return true
     } catch (e) {
       setError((e as Error).message)
@@ -63,11 +73,11 @@ export default function Admin() {
       )}
 
       <div className="admin-block">
-        <h3>Allowed to sign in with Apple</h3>
+        <h3>Invited to sign in with Apple</h3>
         {!view.signInWithApple && <p className="muted small">Sign in with Apple isn't set up on this server yet.</p>}
         <p className="muted small">
           Use the email of their Apple Account, and ask them to choose “Share My Email” when Apple asks. If they hide
-          it, they’ll show up under “Asking to join” instead.
+          it, they’ll show up under “Asking to join” instead. Once they sign in, they move to Members.
         </p>
         {view.allowedEmails.length > 0 && (
           <ul className="admin-list">
@@ -75,7 +85,7 @@ export default function Admin() {
               <li key={a.email}>
                 <span className="admin-who">
                   <strong>{a.displayName}</strong>
-                  <span className="muted small">{a.email}</span>
+                  <span className="muted small">{a.email} · hasn’t signed in yet</span>
                 </span>
                 <button
                   className="link-button"

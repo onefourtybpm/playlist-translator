@@ -115,9 +115,16 @@ a {
   gap: 12px;
 }
 
+/* Sized to match Apple's 240×44 button artwork next to it, including its larger, lighter text. */
 .signin-buttons .button {
-  min-width: 240px;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 240px;
+  height: 44px;
+  padding: 0 16px;
+  font-size: 1.25rem;
+  font-weight: 500;
 }
 
 .apple-id {
@@ -206,6 +213,34 @@ a {
 .banner.info {
   border: 1px solid var(--border);
   background: var(--surface);
+}
+
+.count {
+  display: inline-block;
+  min-width: 1.4em;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--apple);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  text-decoration: none;
+  vertical-align: 1px;
+}
+
+.back-link {
+  align-self: flex-start;
+}
+
+.switch-apple {
+  margin-top: 12px;
+}
+
+.switch-apple p {
+  margin: 0;
 }
 
 .spotify-card {

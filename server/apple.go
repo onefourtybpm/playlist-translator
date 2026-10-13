@@ -37,9 +37,12 @@ type appleStatusJSON struct {
 	ConnectedBy *accountJSON `json:"connectedBy,omitempty"`
 	ConnectedAt *time.Time   `json:"connectedAt,omitempty"`
 	ReconnectBy *time.Time   `json:"reconnectBy,omitempty"`
-	// CanManage is true when the signed-in user may connect, replace, or disconnect the account:
+	// CanManage is true when the signed-in member may connect, replace, or disconnect the account:
 	// anyone while nothing is connected, afterwards only whoever connected it.
 	CanManage bool `json:"canManage"`
+	// CanSwitch is true when the signed-in member may replace the connected account with their
+	// own: members who sign in with Apple can make their Apple Music the one playlists go in.
+	CanSwitch bool `json:"canSwitch"`
 }
 
 func (s *server) appleStatus(r *http.Request) (appleStatusJSON, error) {
@@ -58,7 +61,9 @@ func (s *server) appleStatus(r *http.Request) (appleStatusJSON, error) {
 	status.ConnectedBy = s.memberAccountJSON(r, acct.ConnectedBy)
 	status.ConnectedAt = &acct.ConnectedAt
 	status.ReconnectBy = &reconnectBy
-	status.CanManage = status.Configured && acct.ConnectedBy == memberFrom(r.Context()).ID
+	member := memberFrom(r.Context())
+	status.CanManage = status.Configured && acct.ConnectedBy == member.ID
+	status.CanSwitch = status.Configured && !status.CanManage && member.AppleSub != ""
 	return status, nil
 }
 
@@ -102,7 +107,7 @@ func (s *server) handleAppleConnect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Apple Music isn't set up on this server.")
 		return
 	}
-	if !status.CanManage {
+	if !status.CanManage && !status.CanSwitch {
 		writeError(w, http.StatusForbidden, fmt.Sprintf("Only %s can change the Apple Music connection.", status.ConnectedBy.DisplayName))
 		return
 	}

@@ -7,6 +7,10 @@ export type Member = {
   id: number
   displayName: string
   isAdmin: boolean
+  signsInWithSpotify: boolean
+  signsInWithApple: boolean
+  // People asking to join; only sent to the admin.
+  pendingRequests?: number
 }
 
 export type Me = {
@@ -16,7 +20,10 @@ export type Me = {
   signInWithApple: boolean
 }
 
-export type AdminMember = Member & {
+export type AdminMember = {
+  id: number
+  displayName: string
+  isAdmin: boolean
   // Which ways this member signs in.
   spotify: boolean
   apple: boolean
@@ -77,6 +84,8 @@ export type AppleStatus = {
   connectedAt?: string
   reconnectBy?: string
   canManage: boolean
+  // The signed-in member may make their own Apple Music the connected account.
+  canSwitch: boolean
 }
 
 export type AppleSong = {

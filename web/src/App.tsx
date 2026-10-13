@@ -17,7 +17,24 @@ function takeFromUrl(key: string): string | null {
   return value
 }
 
+// usePath follows the URL path, for the one extra page (/admin), without a router library.
+function usePath(): [string, (to: string) => void] {
+  const [path, setPath] = useState(window.location.pathname)
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname)
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  function navigate(to: string) {
+    window.history.pushState(null, '', to)
+    setPath(to)
+    window.scrollTo(0, 0)
+  }
+  return [path, navigate]
+}
+
 export default function App() {
+  const [path, navigate] = usePath()
   const [me, setMe] = useState<Me | null>(null)
   const [error, setError] = useState<string | null>(() => takeFromUrl('error'))
   const [notice, setNotice] = useState<string | null>(() => takeFromUrl('notice'))
@@ -28,6 +45,13 @@ export default function App() {
       setMe({ member: null, spotify: null, signInWithApple: false })
     })
   }, [])
+
+  // Only the admin has an /admin page; anyone else lands on the translator.
+  useEffect(() => {
+    if (me && !me.member?.isAdmin && path !== '/') {
+      window.history.replaceState(null, '', '/' + window.location.search)
+    }
+  }, [me, path])
 
   async function signOut() {
     await api.logout()
@@ -41,6 +65,23 @@ export default function App() {
         {me?.member && (
           <div className="topbar-account">
             <strong>{me.member.displayName}</strong>
+            {me.member.isAdmin && (
+              <a
+                className="link-button"
+                href="/admin"
+                onClick={(e) => {
+                  e.preventDefault()
+                  navigate('/admin')
+                }}
+              >
+                Admin
+                {(me.member.pendingRequests ?? 0) > 0 && (
+                  <span className="count" aria-label={`${me.member.pendingRequests} asking to join`}>
+                    {me.member.pendingRequests}
+                  </span>
+                )}
+              </a>
+            )}
             <button className="link-button" onClick={signOut}>
               Sign out
             </button>
@@ -67,6 +108,24 @@ export default function App() {
 
       {me === null ? (
         <p className="muted">Loading…</p>
+      ) : me.member?.isAdmin && path === '/admin' ? (
+        <>
+          <a
+            className="link-button back-link"
+            href="/"
+            onClick={(e) => {
+              e.preventDefault()
+              navigate('/')
+            }}
+          >
+            ← Back to the translator
+          </a>
+          <Admin
+            onRequestsChange={(n) =>
+              setMe((prev) => (prev?.member ? { ...prev, member: { ...prev.member, pendingRequests: n } } : prev))
+            }
+          />
+        </>
       ) : me.member ? (
         <SignedIn me={me} onSpotifyDisconnected={() => setMe({ ...me, spotify: null })} onError={setError} />
       ) : (
@@ -135,27 +194,34 @@ function SignedIn({
 
   return (
     <>
-      <SpotifyConnection spotify={me.spotify} onDisconnected={onSpotifyDisconnected} onError={onError} />
+      <SpotifyConnection
+        spotify={me.spotify}
+        signsInWithSpotify={me.member?.signsInWithSpotify ?? false}
+        onDisconnected={onSpotifyDisconnected}
+        onError={onError}
+      />
       {apple && <AppleConnection status={apple} onChange={setApple} />}
       {appleError && (
         <p className="form-error" role="alert">
           {appleError}
         </p>
       )}
-      <Translator apple={apple ?? { configured: false, connected: false, canManage: false }} />
-      {me.member?.isAdmin && <Admin />}
+      <Translator apple={apple ?? { configured: false, connected: false, canManage: false, canSwitch: false }} />
     </>
   )
 }
 
-// SpotifyConnection shows whose Spotify playlists can be translated, and lets the signed-in
-// member connect or disconnect their own Spotify account.
+// SpotifyConnection shows whose Spotify playlists can be translated. Members who sign in with
+// Spotify can also connect or disconnect their own account; members who sign in with Apple only
+// see the list.
 function SpotifyConnection({
   spotify,
+  signsInWithSpotify,
   onDisconnected,
   onError,
 }: {
   spotify: Account | null
+  signsInWithSpotify: boolean
   onDisconnected: () => void
   onError: (message: string) => void
 }) {
@@ -178,6 +244,7 @@ function SpotifyConnection({
     }
   }
 
+  if (!signsInWithSpotify && !accounts?.length) return null
   return (
     <section className="card spotify-card">
       {accounts && accounts.length > 0 && (
@@ -190,7 +257,7 @@ function SpotifyConnection({
           ))}
         </div>
       )}
-      {spotify ? (
+      {!signsInWithSpotify ? null : spotify ? (
         <p className="spotify-status">
           <span className="spotify-dot" aria-hidden="true" /> Your Spotify ({spotify.displayName}) is connected.{' '}
           <button className="link-button" onClick={disconnect}>
