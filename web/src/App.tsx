@@ -48,7 +48,7 @@ export default function App() {
         {me?.spotify && (
           <div className="topbar-account">
             <span>
-              Spotify: <strong>{me.spotify.displayName}</strong>
+              <span className="service-spotify">Spotify:</span> <strong>{me.spotify.displayName}</strong>
             </span>
             <button
               className="link-button"
@@ -57,7 +57,7 @@ export default function App() {
             >
               Sign out
             </button>
-            <button className="link-button danger" onClick={disconnect}>
+            <button className="link-button" onClick={disconnect}>
               Disconnect
             </button>
           </div>
