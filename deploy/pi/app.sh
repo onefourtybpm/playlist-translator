@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
-# One-time app setup for the Raspberry Pi host: service user, folders, secrets, systemd units.
-# Before running, copy spotify.env to ~/spotify.env on the Pi and the systemd/ folder to ~/systemd.
+# App setup for the Raspberry Pi host: service user, folders, secrets, systemd units. Safe to re-run.
+# Inputs, copied to your home folder on the Pi first (each is optional on a re-run):
+#   ~/spotify.env                       SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+#   ~/apple.env + ~/AuthKey_<KeyID>.p8  APPLE_TEAM_ID, APPLE_KEY_ID, and the MusicKit private key
+#   ~/systemd/                          the unit files from deploy/pi/systemd
+# Settings without a new input file are kept from the existing env file. Input files are deleted once used.
 # Run on the Pi as root: sudo bash app.sh
 set -euo pipefail
 
 deployer=${SUDO_USER:?run this with sudo from your own account}
 home=$(getent passwd "$deployer" | cut -d: -f6)
+conf=/etc/playlist-translator
+env_file=$conf/env
 
 echo "=== Service user 'playlist' (no login, no home folder)"
 id playlist &>/dev/null || useradd --system --user-group --no-create-home --shell /usr/sbin/nologin playlist
@@ -14,27 +20,50 @@ echo "=== App folder /opt/playlist-translator/app (owned by $deployer so deploys
 install -d -o root -g root -m 755 /opt/playlist-translator
 install -d -o "$deployer" -g "$deployer" -m 755 /opt/playlist-translator/app /opt/playlist-translator/app/web
 
-echo "=== Secrets in /etc/playlist-translator/env (root only)"
-install -d -o root -g root -m 700 /etc/playlist-translator
-if [[ -f "$home/spotify.env" ]]; then
-  base_url="https://$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
-  umask 077
-  { grep -E '^SPOTIFY_CLIENT_(ID|SECRET)=' "$home/spotify.env"; echo "BASE_URL=$base_url"; } > /etc/playlist-translator/env
-  rm -f "$home/spotify.env"
-  echo "Wrote env with BASE_URL=$base_url and removed ~/spotify.env"
-elif [[ -f /etc/playlist-translator/env ]]; then
-  echo "No ~/spotify.env; keeping the existing env file"
+echo "=== Secrets in $conf"
+# The folder is readable by the service's group so it can open the Apple key; the env file stays root-only.
+install -d -o root -g playlist -m 750 "$conf"
+keep() { [[ -f $env_file ]] && grep -E "^($1)=" "$env_file" || true; }
+
+if [[ -f $home/spotify.env ]]; then
+  spotify=$(grep -E '^SPOTIFY_CLIENT_(ID|SECRET)=' "$home/spotify.env")
 else
-  echo "Missing ~/spotify.env and no existing env file" >&2
-  exit 1
+  spotify=$(keep 'SPOTIFY_CLIENT_(ID|SECRET)')
+fi
+[[ -n $spotify ]] || { echo "Missing ~/spotify.env and no existing Spotify settings" >&2; exit 1; }
+
+if [[ -f $home/apple.env ]]; then
+  key_id=$(sed -n 's/^APPLE_KEY_ID=//p' "$home/apple.env")
+  key_src=$home/AuthKey_$key_id.p8
+  [[ -n $key_id && -f $key_src ]] || { echo "~/apple.env needs APPLE_KEY_ID and a matching ~/AuthKey_<KeyID>.p8" >&2; exit 1; }
+  key_dst=$conf/AuthKey_$key_id.p8
+  install -o root -g playlist -m 640 "$key_src" "$key_dst"
+  find "$conf" -name 'AuthKey_*.p8' ! -name "AuthKey_$key_id.p8" -delete
+  # The Mac's apple.env has a relative dev path for the key, so the Pi path replaces it.
+  apple=$(grep -E '^APPLE_(TEAM_ID|KEY_ID)=' "$home/apple.env"; echo "APPLE_PRIVATE_KEY_PATH=$key_dst")
+else
+  apple=$(keep 'APPLE_(TEAM_ID|KEY_ID|PRIVATE_KEY_PATH)')
 fi
 
-echo "=== systemd units"
-install -o root -g root -m 644 "$home"/systemd/playlist-translator{.service,-restart.path,-restart.service} /etc/systemd/system/
-systemctl daemon-reload
-# Starts at boot; the first deploy starts it now (the binary doesn't exist yet).
-systemctl enable playlist-translator.service
-systemctl enable --now playlist-translator-restart.path
-rm -rf "$home/systemd"
+base_url="https://$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
+(
+  umask 077
+  { echo "$spotify"; if [[ -n $apple ]]; then echo "$apple"; fi; echo "BASE_URL=$base_url"; } > "$env_file.new"
+)
+mv "$env_file.new" "$env_file"
+rm -f "$home/spotify.env" "$home/apple.env" "$home"/AuthKey_*.p8
+echo "Wrote $env_file with: $(cut -d= -f1 "$env_file" | paste -sd' ' -)"
 
-echo "=== Done. Next: run deploy/pi/deploy.sh on the Mac."
+if [[ -d $home/systemd ]]; then
+  echo "=== systemd units"
+  install -o root -g root -m 644 "$home"/systemd/playlist-translator{.service,-restart.path,-restart.service} /etc/systemd/system/
+  systemctl daemon-reload
+  # Starts at boot; on a fresh Pi the first deploy starts it (the binary doesn't exist yet).
+  systemctl enable playlist-translator.service
+  systemctl enable --now playlist-translator-restart.path
+  rm -rf "$home/systemd"
+fi
+
+# Pick up the new settings if the app is already running.
+systemctl try-restart playlist-translator.service
+echo "=== Done"
