@@ -194,6 +194,11 @@ export const api = {
       body: JSON.stringify({ displayName }),
     }),
   denyRequest: (id: number) => request<AdminView>(`/api/admin/requests/${id}`, { method: 'DELETE' }),
+  renameMember: (id: number, displayName: string) =>
+    request<AdminView>(`/api/admin/members/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ displayName }),
+    }),
   removeMember: (id: number) => request<AdminView>(`/api/admin/members/${id}`, { method: 'DELETE' }),
 }
 

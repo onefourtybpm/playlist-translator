@@ -77,6 +77,18 @@ func (s *Store) CreateMember(ctx context.Context, m Member) (Member, error) {
 	return s.GetMember(ctx, id)
 }
 
+// RenameMember changes a member's display name. It returns ErrNotFound if there's no such member.
+func (s *Store) RenameMember(ctx context.Context, id int64, displayName string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE members SET display_name = ? WHERE id = ?`, displayName, id)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return ErrNotFound
+	}
+	return err
+}
+
 func (s *Store) LinkSpotify(ctx context.Context, memberID int64, spotifyUserID string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE members SET spotify_user_id = ? WHERE id = ?`, spotifyUserID, memberID)
 	return err

@@ -124,8 +124,19 @@ export default function App() {
             ← Back to the translator
           </a>
           <Admin
-            onRequestsChange={(n) =>
-              setMe((prev) => (prev?.member ? { ...prev, member: { ...prev.member, pendingRequests: n } } : prev))
+            onChange={(view) =>
+              setMe((prev) => {
+                if (!prev?.member) return prev
+                const self = view.members.find((m) => m.id === prev.member?.id)
+                return {
+                  ...prev,
+                  member: {
+                    ...prev.member,
+                    displayName: self?.displayName ?? prev.member.displayName,
+                    pendingRequests: view.requests.length,
+                  },
+                }
+              })
             }
           />
         </>

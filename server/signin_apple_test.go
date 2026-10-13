@@ -348,3 +348,35 @@ func TestAppleMemberCanSwitchAppleMusic(t *testing.T) {
 		t.Errorf("admin disconnecting the friend's account: %d", code)
 	}
 }
+
+func TestAdminRenamesMembers(t *testing.T) {
+	srv := newTestServer(t, newFakeSpotify(t, nil), account("admin", time.Hour), account("hales", time.Hour))
+	admin := sessionFor(t, srv, "admin")
+	hales := sessionFor(t, srv, "hales")
+	path := fmt.Sprintf("/api/admin/members/%d", memberID(t, srv, "hales"))
+
+	if code := apiAs(t, srv, hales, "PATCH", path, `{"displayName":"Me"}`, nil); code != http.StatusForbidden {
+		t.Errorf("non-admin renaming: %d", code)
+	}
+	if code := apiAs(t, srv, admin, "PATCH", path, `{"displayName":"   "}`, nil); code != http.StatusBadRequest {
+		t.Errorf("blank name: %d", code)
+	}
+	if code := apiAs(t, srv, admin, "PATCH", "/api/admin/members/999", `{"displayName":"X"}`, nil); code != http.StatusNotFound {
+		t.Errorf("unknown member: %d", code)
+	}
+	if code := apiAs(t, srv, admin, "PATCH", path, `{"displayName":"  Hailey  S "}`, nil); code != http.StatusOK {
+		t.Fatalf("rename: %d", code)
+	}
+
+	// The new name shows wherever the member appears, including whose playlists can be translated.
+	var me meResponse
+	apiAs(t, srv, hales, "GET", "/api/me", "", &me)
+	if me.Member == nil || me.Member.DisplayName != "Hailey S" {
+		t.Errorf("/api/me = %+v", me.Member)
+	}
+	var accounts []accountJSON
+	apiAs(t, srv, admin, "GET", "/api/spotify/accounts", "", &accounts)
+	if len(accounts) != 2 || accounts[1].DisplayName != "Hailey S" {
+		t.Errorf("accounts = %+v", accounts)
+	}
+}

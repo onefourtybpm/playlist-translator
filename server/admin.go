@@ -156,6 +156,38 @@ func (s *server) handleDenyRequest(w http.ResponseWriter, r *http.Request) {
 	s.handleAdmin(w, r)
 }
 
+func (s *server) handleRenameMember(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "Not found.")
+		return
+	}
+	var req struct {
+		DisplayName string `json:"displayName"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Send the new name.")
+		return
+	}
+	name := cleanName(req.DisplayName)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "The name can't be empty.")
+		return
+	}
+	err = s.store.RenameMember(r.Context(), id, name)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "That member is gone. Refresh the page.")
+		return
+	}
+	if err != nil {
+		slog.Error("rename member", "err", err)
+		writeError(w, http.StatusInternalServerError, "Couldn't rename that member.")
+		return
+	}
+	slog.Info("member renamed", "member", id, "by", memberFrom(r.Context()).ID)
+	s.handleAdmin(w, r)
+}
+
 func (s *server) handleRemoveMember(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {

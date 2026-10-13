@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -75,6 +76,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/admin/allowed-emails/{email}", s.requireAdmin(s.handleRemoveAllowedEmail))
 	mux.HandleFunc("POST /api/admin/requests/{id}/approve", s.requireAdmin(s.handleApproveRequest))
 	mux.HandleFunc("DELETE /api/admin/requests/{id}", s.requireAdmin(s.handleDenyRequest))
+	mux.HandleFunc("PATCH /api/admin/members/{id}", s.requireAdmin(s.handleRenameMember))
 	mux.HandleFunc("DELETE /api/admin/members/{id}", s.requireAdmin(s.handleRemoveMember))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Not found.")
@@ -374,17 +376,33 @@ func (s *server) memberAccountJSON(r *http.Request, id int64) *accountJSON {
 	return &accountJSON{ID: strconv.FormatInt(id, 10), DisplayName: "a former member"}
 }
 
+// handleListAccounts lists the connected Spotify accounts, named as their members are (the admin
+// can rename members), falling back to the Spotify profile name.
 func (s *server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
-	accounts, err := s.store.ListSpotifyAccounts(r.Context())
-	if err != nil {
+	accounts, err1 := s.store.ListSpotifyAccounts(r.Context())
+	members, err2 := s.store.ListMembers(r.Context())
+	if err := errors.Join(err1, err2); err != nil {
 		slog.Error("list spotify accounts", "err", err)
 		writeError(w, http.StatusInternalServerError, "Couldn't load connected accounts.")
 		return
 	}
+	names := map[string]string{}
+	for _, m := range members {
+		if m.SpotifyUserID != "" {
+			names[m.SpotifyUserID] = m.DisplayName
+		}
+	}
 	out := make([]accountJSON, 0, len(accounts))
 	for _, a := range accounts {
-		out = append(out, accountJSON{ID: a.UserID, DisplayName: a.DisplayName})
+		name := a.DisplayName
+		if n, ok := names[a.UserID]; ok {
+			name = n
+		}
+		out = append(out, accountJSON{ID: a.UserID, DisplayName: name})
 	}
+	slices.SortFunc(out, func(a, b accountJSON) int {
+		return strings.Compare(strings.ToLower(a.DisplayName), strings.ToLower(b.DisplayName))
+	})
 	writeJSON(w, http.StatusOK, out)
 }
 

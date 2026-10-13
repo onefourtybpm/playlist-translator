@@ -1,16 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { api, type AccessRequest, type AdminView } from './api'
+import { api, type AccessRequest, type AdminMember, type AdminView } from './api'
 
 // Admin is the admin's view of who can use the app: people waiting to be let in, emails allowed
 // to sign in with Apple, and current members.
-export default function Admin({ onRequestsChange }: { onRequestsChange: (count: number) => void }) {
+// onChange receives every fresh view, so the page can update the header (pending count, and the
+// admin's own name if they renamed themselves).
+export default function Admin({ onChange }: { onChange: (view: AdminView) => void }) {
   const [view, setView] = useState<AdminView | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   function show(v: AdminView) {
     setView(v)
-    onRequestsChange(v.requests.length)
+    onChange(v)
   }
 
   // Reload whenever the page comes back into view: people sign in and ask to join elsewhere.
@@ -105,34 +107,104 @@ export default function Admin({ onRequestsChange }: { onRequestsChange: (count: 
         <h3>Members</h3>
         <ul className="admin-list">
           {view.members.map((m) => (
-            <li key={m.id}>
-              <span className="admin-who">
-                <strong>
-                  {m.displayName}
-                  {m.isAdmin && <span className="muted small"> (admin)</span>}
-                </strong>
-                <span className="muted small">
-                  Signs in with {[m.spotify && 'Spotify', m.apple && 'Apple'].filter(Boolean).join(' or ') || 'nothing yet'}
-                </span>
-              </span>
-              {!m.isAdmin && (
-                <button
-                  className="link-button"
-                  disabled={busy}
-                  onClick={() => {
-                    if (window.confirm(`Remove ${m.displayName}? They’ll be signed out and their Spotify connection deleted.`)) {
-                      run(() => api.removeMember(m.id))
-                    }
-                  }}
-                >
-                  Remove
-                </button>
-              )}
-            </li>
+            <MemberRow
+              key={m.id}
+              member={m}
+              busy={busy}
+              onRename={(name) => run(() => api.renameMember(m.id, name))}
+              onRemove={() => {
+                if (window.confirm(`Remove ${m.displayName}? They’ll be signed out and their Spotify connection deleted.`)) {
+                  run(() => api.removeMember(m.id))
+                }
+              }}
+            />
           ))}
         </ul>
       </div>
     </section>
+  )
+}
+
+function MemberRow({
+  member,
+  busy,
+  onRename,
+  onRemove,
+}: {
+  member: AdminMember
+  busy: boolean
+  onRename: (name: string) => Promise<boolean>
+  onRemove: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(member.displayName)
+
+  async function save(e: FormEvent) {
+    e.preventDefault()
+    if (await onRename(name)) setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <li>
+        <form className="rename-form" onSubmit={save}>
+          <input
+            aria-label={`New name for ${member.displayName}`}
+            className="text-input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            autoFocus
+            autoComplete="off"
+          />
+          <span className="admin-actions">
+            <button className="button small-button" type="submit" disabled={busy || !name.trim()}>
+              Save
+            </button>
+            <button
+              className="link-button"
+              type="button"
+              onClick={() => {
+                setName(member.displayName)
+                setEditing(false)
+              }}
+            >
+              Cancel
+            </button>
+          </span>
+        </form>
+      </li>
+    )
+  }
+
+  return (
+    <li>
+      <span className="admin-who">
+        <strong>
+          {member.displayName}
+          {member.isAdmin && <span className="muted small"> (admin)</span>}
+        </strong>
+        <span className="muted small">
+          Signs in with {[member.spotify && 'Spotify', member.apple && 'Apple'].filter(Boolean).join(' or ') || 'nothing yet'}
+        </span>
+      </span>
+      <span className="admin-actions">
+        <button
+          className="link-button"
+          disabled={busy}
+          onClick={() => {
+            setName(member.displayName)
+            setEditing(true)
+          }}
+        >
+          Rename
+        </button>
+        {!member.isAdmin && (
+          <button className="link-button" disabled={busy} onClick={onRemove}>
+            Remove
+          </button>
+        )}
+      </span>
+    </li>
   )
 }
 

@@ -343,6 +343,18 @@ a {
   padding: 6px 16px;
 }
 
+.rename-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  width: 100%;
+}
+
+.rename-form .text-input {
+  flex: 1 1 180px;
+}
+
 .allow-form {
   display: flex;
   flex-wrap: wrap;
