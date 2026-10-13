@@ -30,7 +30,7 @@ export default function App() {
 
   async function disconnect() {
     const ok = window.confirm(
-      'Disconnect your Spotify account? Your playlists can no longer be translated until you connect again.',
+      'Disconnect Spotify? This removes your Spotify connection from the app, so nobody in the group can translate your playlists until you connect again. Playlists already translated stay in Apple Music.',
     )
     if (!ok) return
     try {
@@ -48,13 +48,17 @@ export default function App() {
         {me?.spotify && (
           <div className="topbar-account">
             <span>
-              Signed in as <strong>{me.spotify.displayName}</strong>
+              Spotify: <strong>{me.spotify.displayName}</strong>
             </span>
-            <button className="link-button" onClick={signOut}>
+            <button
+              className="link-button"
+              onClick={signOut}
+              title="Signs out this browser only. Your playlists stay available to the group."
+            >
               Sign out
             </button>
             <button className="link-button danger" onClick={disconnect}>
-              Disconnect Spotify
+              Disconnect
             </button>
           </div>
         )}
