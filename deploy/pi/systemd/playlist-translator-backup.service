@@ -1,0 +1,23 @@
+[Unit]
+Description=Back up the Playlist Translator database
+
+[Service]
+Type=oneshot
+User=playlist
+Group=playlist
+ExecStart=/usr/local/libexec/playlist-translator-backup
+# The backup folder is setgid to the deploy user's group, so 0027 makes backups readable by them
+# (to copy off the Pi) and no one else.
+UMask=0027
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/playlist-translator /var/backups/playlist-translator
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+CapabilityBoundingSet=

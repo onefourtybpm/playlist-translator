@@ -4,6 +4,7 @@
 #   ~/spotify.env                       SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
 #   ~/apple.env + ~/AuthKey_<KeyID>.p8  APPLE_TEAM_ID, APPLE_KEY_ID, and the MusicKit private key
 #   ~/systemd/                          the unit files from deploy/pi/systemd
+#   ~/backup-db.sh                      the nightly backup script
 # Settings without a new input file are kept from the existing env file. Input files are deleted once used.
 # Run on the Pi as root: sudo bash app.sh
 set -euo pipefail
@@ -54,16 +55,28 @@ mv "$env_file.new" "$env_file"
 rm -f "$home/spotify.env" "$home/apple.env" "$home"/AuthKey_*.p8
 echo "Wrote $env_file with: $(cut -d= -f1 "$env_file" | paste -sd' ' -)"
 
+echo "=== Backup folder /var/backups/playlist-translator (readable by $deployer to copy off the Pi)"
+# setgid, so backups the service user writes belong to the deployer's group.
+install -d -o playlist -g "$deployer" -m 2750 /var/backups/playlist-translator
+if [[ -f $home/backup-db.sh ]]; then
+  install -o root -g root -m 755 "$home/backup-db.sh" /usr/local/libexec/playlist-translator-backup
+  rm -f "$home/backup-db.sh"
+fi
+
 if [[ -d $home/systemd ]]; then
   echo "=== systemd units"
-  install -o root -g root -m 644 "$home"/systemd/playlist-translator{.service,-restart.path,-restart.service} /etc/systemd/system/
+  install -o root -g root -m 644 "$home"/systemd/playlist-translator* /etc/systemd/system/
   systemctl daemon-reload
   # Starts at boot; on a fresh Pi the first deploy starts it (the binary doesn't exist yet).
   systemctl enable playlist-translator.service
-  systemctl enable --now playlist-translator-restart.path
+  systemctl enable --now playlist-translator-restart.path playlist-translator-backup.timer
   rm -rf "$home/systemd"
 fi
 
 # Pick up the new settings if the app is already running.
 systemctl try-restart playlist-translator.service
+
+echo "=== Test backup"
+systemctl start playlist-translator-backup.service
+journalctl -u playlist-translator-backup --no-pager -n 3 -o cat
 echo "=== Done"
