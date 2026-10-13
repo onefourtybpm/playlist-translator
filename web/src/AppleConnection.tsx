@@ -97,7 +97,7 @@ export default function AppleConnection({ status, onChange }: Props) {
               <button className="button apple-button" onClick={connect} disabled={busy || !music}>
                 Reconnect
               </button>
-              <button className="link-button danger" onClick={disconnect} disabled={busy}>
+              <button className="link-button" onClick={disconnect} disabled={busy}>
                 Disconnect Apple Music
               </button>
             </div>

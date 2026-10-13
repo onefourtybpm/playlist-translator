@@ -202,10 +202,6 @@ a {
   cursor: pointer;
 }
 
-.link-button.danger {
-  color: var(--danger);
-}
-
 .banner {
   display: flex;
   justify-content: space-between;
