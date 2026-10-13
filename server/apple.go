@@ -55,19 +55,11 @@ func (s *server) appleStatus(r *http.Request) (appleStatusJSON, error) {
 	reconnectBy := acct.ConnectedAt.Add(appleTokenLifetime)
 	status.Connected = true
 	status.Storefront = acct.Storefront
-	status.ConnectedBy = s.spotifyAccountJSON(r, acct.ConnectedBy)
+	status.ConnectedBy = s.memberAccountJSON(r, acct.ConnectedBy)
 	status.ConnectedAt = &acct.ConnectedAt
 	status.ReconnectBy = &reconnectBy
-	status.CanManage = status.Configured && acct.ConnectedBy == sessionFrom(r.Context()).SpotifyUserID
+	status.CanManage = status.Configured && acct.ConnectedBy == memberFrom(r.Context()).ID
 	return status, nil
-}
-
-// spotifyAccountJSON names a Spotify user, falling back to their ID if they've disconnected.
-func (s *server) spotifyAccountJSON(r *http.Request, userID string) *accountJSON {
-	if a, err := s.store.GetSpotifyAccount(r.Context(), userID); err == nil {
-		return &accountJSON{ID: a.UserID, DisplayName: a.DisplayName}
-	}
-	return &accountJSON{ID: userID, DisplayName: userID}
 }
 
 func (s *server) handleAppleStatus(w http.ResponseWriter, r *http.Request) {
@@ -145,11 +137,11 @@ func (s *server) handleAppleConnect(w http.ResponseWriter, r *http.Request) {
 		keepFolder = exists || err != nil
 	}
 
-	userID := sessionFrom(r.Context()).SpotifyUserID
+	memberID := memberFrom(r.Context()).ID
 	err = s.store.SetAppleAccount(r.Context(), store.AppleAccount{
 		MusicUserToken: req.MusicUserToken,
 		Storefront:     storefront,
-		ConnectedBy:    userID,
+		ConnectedBy:    memberID,
 		ConnectedAt:    time.Now(),
 	})
 	if err == nil && !keepFolder {
@@ -160,7 +152,7 @@ func (s *server) handleAppleConnect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Couldn't save the Apple Music connection.")
 		return
 	}
-	slog.Info("apple music connected", "by", userID, "storefront", storefront, "kept_folder", keepFolder)
+	slog.Info("apple music connected", "by", memberID, "storefront", storefront, "kept_folder", keepFolder)
 	s.handleAppleStatus(w, r)
 }
 
@@ -180,7 +172,7 @@ func (s *server) handleAppleDisconnect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Couldn't disconnect Apple Music.")
 		return
 	}
-	slog.Info("apple music disconnected", "by", sessionFrom(r.Context()).SpotifyUserID)
+	slog.Info("apple music disconnected", "by", memberFrom(r.Context()).ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -215,7 +207,7 @@ func (s *server) handlePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	result, err := s.readPlaylist(ctx, sessionFrom(ctx).SpotifyUserID, playlistID)
+	result, err := s.readPlaylist(ctx, memberFrom(ctx).SpotifyUserID, playlistID)
 	if err != nil {
 		s.writeSpotifyError(w, playlistID, err)
 		return
@@ -240,7 +232,7 @@ func (s *server) handlePreview(w http.ResponseWriter, r *http.Request) {
 	for _, t := range previous {
 		prevJSON = append(prevJSON, translationJSON{
 			Name: t.Name, ShareURL: t.ShareURL, SongCount: t.SongCount,
-			CreatedBy: *s.spotifyAccountJSON(r, t.CreatedBy), CreatedAt: t.CreatedAt,
+			CreatedBy: *s.memberAccountJSON(r, t.CreatedBy), CreatedAt: t.CreatedAt,
 		})
 	}
 
@@ -342,20 +334,20 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := sessionFrom(ctx).SpotifyUserID
+	memberID := memberFrom(ctx).ID
 	err = s.store.AddTranslation(ctx, store.Translation{
 		SpotifyPlaylistID: playlistID,
 		Name:              meta.Name,
 		ApplePlaylistID:   pl.ID,
 		ShareURL:          pl.ShareURL(),
 		SongCount:         len(req.SongIDs),
-		CreatedBy:         userID,
+		CreatedBy:         memberID,
 		CreatedAt:         time.Now(),
 	})
 	if err != nil {
 		slog.Error("save translation", "err", err)
 	}
-	slog.Info("apple playlist created", "playlist", playlistID, "apple_playlist", pl.ID, "songs", len(req.SongIDs), "by", userID)
+	slog.Info("apple playlist created", "playlist", playlistID, "apple_playlist", pl.ID, "songs", len(req.SongIDs), "by", memberID)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"name":      meta.Name,
 		"shareUrl":  pl.ShareURL(),
@@ -412,7 +404,7 @@ func (s *server) createApplePlaylist(r *http.Request, acct store.AppleAccount, p
 }
 
 func (s *server) reconnectMessage(r *http.Request, acct store.AppleAccount) string {
-	who := s.spotifyAccountJSON(r, acct.ConnectedBy).DisplayName
+	who := s.memberAccountJSON(r, acct.ConnectedBy).DisplayName
 	return fmt.Sprintf("Apple Music stopped accepting the connection (it lasts about six months). %s needs to connect Apple Music again.", who)
 }
 

@@ -86,11 +86,24 @@ func newTestServer(t *testing.T, fake *httptest.Server, accounts ...store.Spotif
 		if err := db.UpsertSpotifyAccount(context.Background(), a); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := db.CreateMember(context.Background(), store.Member{DisplayName: a.DisplayName, SpotifyUserID: a.UserID}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	client := spotify.NewClient("id", "secret", "http://127.0.0.1:8080/callback")
 	client.AccountsURL = fake.URL
 	client.APIURL = fake.URL + "/v1"
 	return &server{store: db, spotify: client}
+}
+
+// memberID returns the member who signs in with this Spotify user ID.
+func memberID(t *testing.T, srv *server, spotifyUserID string) int64 {
+	t.Helper()
+	m, err := srv.store.MemberBySpotifyID(context.Background(), spotifyUserID)
+	if err != nil {
+		t.Fatalf("member for %s: %v", spotifyUserID, err)
+	}
+	return m.ID
 }
 
 func account(user string, expiresIn time.Duration) store.SpotifyAccount {
@@ -157,15 +170,17 @@ func TestSessionsAndDisconnect(t *testing.T) {
 	srv := newTestServer(t, fake, account("alice", time.Hour))
 	ctx := context.Background()
 
-	token, err := srv.store.CreateSession(ctx, "alice", time.Hour)
+	alice := memberID(t, srv, "alice")
+	token, err := srv.store.CreateSession(ctx, alice, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess, err := srv.store.GetSession(ctx, token); err != nil || sess.SpotifyUserID != "alice" {
+	if sess, err := srv.store.GetSession(ctx, token); err != nil || sess.MemberID != alice {
 		t.Fatalf("GetSession() = %+v, %v", sess, err)
 	}
 
-	// Disconnecting deletes the account, and its sessions with it.
+	// Disconnecting deletes the Spotify tokens. Alice stays a member and stays signed in, so
+	// signing in with Spotify again reconnects the same membership.
 	req := httptest.NewRequest(http.MethodDelete, "/api/spotify/account", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 	rec := httptest.NewRecorder()
@@ -176,8 +191,11 @@ func TestSessionsAndDisconnect(t *testing.T) {
 	if _, err := srv.store.GetSpotifyAccount(ctx, "alice"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("account still present: %v", err)
 	}
-	if _, err := srv.store.GetSession(ctx, token); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("session still present: %v", err)
+	if _, err := srv.store.GetSession(ctx, token); err != nil {
+		t.Errorf("session gone: %v", err)
+	}
+	if m, err := srv.store.MemberBySpotifyID(ctx, "alice"); err != nil || m.ID != alice {
+		t.Errorf("member after disconnect = %+v, %v", m, err)
 	}
 }
 
@@ -216,4 +234,18 @@ func TestLoadEnvFile(t *testing.T) {
 	if got := os.Getenv("PT_TEST_C"); got != "from-env" {
 		t.Errorf("PT_TEST_C = %q; real environment should win", got)
 	}
+}
+
+// sessionFor signs in as the member with this Spotify user ID and returns the session token.
+func sessionFor(t *testing.T, srv *server, spotifyUserID string) string {
+	t.Helper()
+	token, err := srv.store.CreateSession(context.Background(), memberID(t, srv, spotifyUserID), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func storeMember(name, spotifyUserID, appleSub string) store.Member {
+	return store.Member{DisplayName: name, SpotifyUserID: spotifyUserID, AppleSub: appleSub}
 }

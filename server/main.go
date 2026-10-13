@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/onefourtybpm/playlist-translator/server/internal/apple"
+	"github.com/onefourtybpm/playlist-translator/server/internal/appleid"
 	"github.com/onefourtybpm/playlist-translator/server/internal/spotify"
 	"github.com/onefourtybpm/playlist-translator/server/internal/store"
 )
@@ -39,6 +40,12 @@ type config struct {
 	AppleTeamID  string
 	AppleKeyID   string
 	AppleKeyPath string
+
+	// Sign in with Apple. Optional: without it, people sign in with Spotify only. It shares
+	// APPLE_TEAM_ID but has its own key, made for the primary App ID the Services ID belongs to.
+	SignInServicesID string
+	SignInKeyID      string
+	SignInKeyPath    string
 }
 
 func main() {
@@ -70,12 +77,16 @@ func run() error {
 	cfg.AppleTeamID = os.Getenv("APPLE_TEAM_ID")
 	cfg.AppleKeyID = os.Getenv("APPLE_KEY_ID")
 	cfg.AppleKeyPath = os.Getenv("APPLE_PRIVATE_KEY_PATH")
+	cfg.SignInServicesID = os.Getenv("SIGN_IN_WITH_APPLE_SERVICES_ID")
+	cfg.SignInKeyID = os.Getenv("SIGN_IN_WITH_APPLE_KEY_ID")
+	cfg.SignInKeyPath = os.Getenv("SIGN_IN_WITH_APPLE_KEY_PATH")
 	cfg.BaseURL = strings.TrimRight(envOr("BASE_URL", "http://"+cfg.Addr), "/")
 	cfg.AppURL = strings.TrimRight(envOr("APP_URL", cfg.BaseURL), "/")
 	if cfg.SpotifyClientID == "" || cfg.SpotifyClientSecret == "" {
 		return errors.New("SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET must be set (pass -env with the path to your credentials file)")
 	}
 
+	var err error
 	var appleClient *apple.Client
 	if cfg.AppleTeamID != "" || cfg.AppleKeyID != "" || cfg.AppleKeyPath != "" {
 		tokens, err := apple.LoadTokenSigner(cfg.AppleTeamID, cfg.AppleKeyID, cfg.AppleKeyPath)
@@ -85,6 +96,17 @@ func run() error {
 		appleClient = apple.NewClient(tokens)
 	} else {
 		slog.Warn("Apple Music is disabled: APPLE_TEAM_ID, APPLE_KEY_ID and APPLE_PRIVATE_KEY_PATH aren't set")
+	}
+
+	var appleIDClient *appleid.Client
+	if cfg.SignInServicesID != "" || cfg.SignInKeyID != "" || cfg.SignInKeyPath != "" {
+		appleIDClient, err = appleid.Load(cfg.AppleTeamID, cfg.SignInServicesID, cfg.SignInKeyID, cfg.SignInKeyPath,
+			cfg.BaseURL+"/auth/apple/callback")
+		if err != nil {
+			return fmt.Errorf("SIGN_IN_WITH_APPLE_SERVICES_ID, SIGN_IN_WITH_APPLE_KEY_ID, SIGN_IN_WITH_APPLE_KEY_PATH and APPLE_TEAM_ID: %w", err)
+		}
+	} else {
+		slog.Warn("Sign in with Apple is disabled: SIGN_IN_WITH_APPLE_SERVICES_ID, SIGN_IN_WITH_APPLE_KEY_ID and SIGN_IN_WITH_APPLE_KEY_PATH aren't set")
 	}
 
 	db, err := store.Open(cfg.DBPath)
@@ -98,7 +120,8 @@ func run() error {
 		store:   db,
 		spotify: spotify.NewClient(cfg.SpotifyClientID, cfg.SpotifyClientSecret, cfg.BaseURL+"/callback"),
 
-		apple: appleClient,
+		apple:   appleClient,
+		appleID: appleIDClient,
 	}
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,

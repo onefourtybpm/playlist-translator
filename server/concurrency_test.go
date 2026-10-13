@@ -35,7 +35,7 @@ func TestUsersAtTheSameTime(t *testing.T) {
 	// Each user gets their own session, as if signed in on their own phone.
 	sessions := map[string]string{}
 	for user := range playlists {
-		token, err := srv.store.CreateSession(context.Background(), user, time.Hour)
+		token, err := srv.store.CreateSession(context.Background(), memberID(t, srv, user), time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -117,7 +117,7 @@ func newFakeApple(t *testing.T) (*fakeApple, *apple.Client) {
 // call sends a request as the given user (who gets a fresh session) and decodes the JSON reply.
 func call(t *testing.T, srv *server, user, method, path, body string, out any) int {
 	t.Helper()
-	token, err := srv.store.CreateSession(context.Background(), user, time.Hour)
+	token, err := srv.store.CreateSession(context.Background(), memberID(t, srv, user), time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestCreateReportsExpiredAppleConnection(t *testing.T) {
 	srv := newTestServer(t, newFakeSpotify(t, map[string]fakePlaylist{"bobsplaylist12345678ab": {owner: "bob", public: true}}), account("bob", time.Hour))
 	_, srv.apple = newFakeApple(t)
 	// Saved directly: the token has since been revoked or expired.
-	srv.store.SetAppleAccount(context.Background(), store.AppleAccount{MusicUserToken: "expired", Storefront: "us", ConnectedBy: "bob", ConnectedAt: time.Now()})
+	srv.store.SetAppleAccount(context.Background(), store.AppleAccount{MusicUserToken: "expired", Storefront: "us", ConnectedBy: memberID(t, srv, "bob"), ConnectedAt: time.Now()})
 
 	var resp struct{ Error string }
 	code := call(t, srv, "bob", "POST", "/api/translate", `{"link":"bobsplaylist12345678ab","songIds":["111"]}`, &resp)

@@ -54,19 +54,28 @@ func NewTokenSigner(teamID, keyID string, pemBytes []byte) (*TokenSigner, error)
 	if teamID == "" || keyID == "" {
 		return nil, errors.New("apple: team ID and key ID are required")
 	}
+	key, err := ParsePrivateKey(pemBytes)
+	if err != nil {
+		return nil, err
+	}
+	return &TokenSigner{TeamID: teamID, KeyID: keyID, key: key, now: time.Now}, nil
+}
+
+// ParsePrivateKey parses an Apple .p8 private key: a PEM-encoded PKCS#8 P-256 EC key.
+func ParsePrivateKey(pemBytes []byte) (*ecdsa.PrivateKey, error) {
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
-		return nil, errors.New("apple: MusicKit key is not PEM-encoded")
+		return nil, errors.New("apple: private key is not PEM-encoded")
 	}
 	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("apple: parse MusicKit key: %w", err)
+		return nil, fmt.Errorf("apple: parse private key: %w", err)
 	}
 	key, ok := parsed.(*ecdsa.PrivateKey)
 	if !ok || key.Curve.Params().BitSize != 256 {
-		return nil, errors.New("apple: MusicKit key must be a P-256 EC key")
+		return nil, errors.New("apple: private key must be a P-256 EC key")
 	}
-	return &TokenSigner{TeamID: teamID, KeyID: keyID, key: key, now: time.Now}, nil
+	return key, nil
 }
 
 // Token returns a valid developer token, reusing the cached one until it's close to expiring.
@@ -90,22 +99,27 @@ func (s *TokenSigner) Token() (string, error) {
 }
 
 func (s *TokenSigner) sign(issued, expires time.Time) (string, error) {
-	header, err := json.Marshal(map[string]string{"alg": "ES256", "kid": s.KeyID, "typ": "JWT"})
-	if err != nil {
-		return "", err
-	}
-	claims, err := json.Marshal(map[string]any{
+	return SignJWT(s.key, map[string]string{"alg": "ES256", "kid": s.KeyID, "typ": "JWT"}, map[string]any{
 		"iss": s.TeamID,
 		"iat": issued.Unix(),
 		"exp": expires.Unix(),
 	})
+}
+
+// SignJWT signs an ES256 JSON Web Token with an Apple private key.
+func SignJWT(key *ecdsa.PrivateKey, header map[string]string, claims map[string]any) (string, error) {
+	h, err := json.Marshal(header)
 	if err != nil {
 		return "", err
 	}
-	signingInput := b64(header) + "." + b64(claims)
+	c, err := json.Marshal(claims)
+	if err != nil {
+		return "", err
+	}
+	signingInput := b64(h) + "." + b64(c)
 
 	digest := sha256.Sum256([]byte(signingInput))
-	r, sig, err := ecdsa.Sign(rand.Reader, s.key, digest[:])
+	r, sig, err := ecdsa.Sign(rand.Reader, key, digest[:])
 	if err != nil {
 		return "", err
 	}

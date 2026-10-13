@@ -7,16 +7,19 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/onefourtybpm/playlist-translator/server/internal/apple"
+	"github.com/onefourtybpm/playlist-translator/server/internal/appleid"
 	"github.com/onefourtybpm/playlist-translator/server/internal/spotify"
 	"github.com/onefourtybpm/playlist-translator/server/internal/store"
 )
@@ -24,6 +27,7 @@ import (
 const (
 	sessionCookie    = "pt_session"
 	oauthStateCookie = "pt_oauth_state"
+	appleStateCookie = "pt_apple_state"
 	sessionTTL       = 90 * 24 * time.Hour
 )
 
@@ -34,6 +38,11 @@ type server struct {
 
 	// apple is nil when Apple Music isn't configured.
 	apple *apple.Client
+	// appleID is nil when Sign in with Apple isn't configured.
+	appleID *appleid.Client
+
+	appleSignInsMu sync.Mutex
+	appleSignIns   map[string]*appleSignIn // in-progress Sign in with Apple, by state
 
 	// refreshMu serializes token refreshes so two requests don't refresh the same account at once.
 	refreshMu sync.Mutex
@@ -46,6 +55,9 @@ func (s *server) routes() http.Handler {
 
 	mux.HandleFunc("GET /auth/spotify/login", s.handleSpotifyLogin)
 	mux.HandleFunc("GET /callback", s.handleSpotifyCallback)
+	mux.HandleFunc("GET /auth/apple/login", s.handleAppleSignIn)
+	mux.HandleFunc("POST /auth/apple/callback", s.handleAppleSignInCallback)
+	mux.HandleFunc("GET /auth/apple/finish", s.handleAppleSignInFinish)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 
 	mux.HandleFunc("GET /api/me", s.handleMe)
@@ -58,6 +70,12 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/apple/connection", s.requireSession(s.handleAppleDisconnect))
 	mux.HandleFunc("POST /api/translate/preview", s.requireSession(s.handlePreview))
 	mux.HandleFunc("POST /api/translate", s.requireSession(s.handleCreate))
+	mux.HandleFunc("GET /api/admin", s.requireAdmin(s.handleAdmin))
+	mux.HandleFunc("POST /api/admin/allowed-emails", s.requireAdmin(s.handleAllowEmail))
+	mux.HandleFunc("DELETE /api/admin/allowed-emails/{email}", s.requireAdmin(s.handleRemoveAllowedEmail))
+	mux.HandleFunc("POST /api/admin/requests/{id}/approve", s.requireAdmin(s.handleApproveRequest))
+	mux.HandleFunc("DELETE /api/admin/requests/{id}", s.requireAdmin(s.handleDenyRequest))
+	mux.HandleFunc("DELETE /api/admin/members/{id}", s.requireAdmin(s.handleRemoveMember))
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "Not found.")
 	})
@@ -129,15 +147,70 @@ func (s *server) handleSpotifyCallback(w http.ResponseWriter, r *http.Request) {
 		s.redirectToApp(w, r, "Couldn't save your Spotify connection.")
 		return
 	}
-	session, err := s.store.CreateSession(ctx, me.ID, sessionTTL)
+	member, err := s.spotifyMember(r, me.ID, me.DisplayName)
 	if err != nil {
+		var ue *userError
+		if errors.As(err, &ue) {
+			s.redirectToApp(w, r, ue.message)
+			return
+		}
+		slog.Error("find member for spotify account", "err", err)
+		s.redirectToApp(w, r, "Couldn't sign you in.")
+		return
+	}
+	if err := s.startSession(w, r, member); err != nil {
 		slog.Error("create session", "err", err)
 		s.redirectToApp(w, r, "Couldn't sign you in.")
 		return
 	}
-	http.SetCookie(w, s.cookie(sessionCookie, session, sessionTTL))
-	slog.Info("spotify account connected", "user", me.ID)
+	slog.Info("spotify account connected", "user", me.ID, "member", member.ID)
 	s.redirectToApp(w, r, "")
+}
+
+// spotifyMember finds the member a Spotify sign-in belongs to. Someone already signed in (with
+// Apple) is connecting Spotify to their membership; otherwise it's the member who signed in with
+// this Spotify account before, or a new member: Spotify itself only lets in the accounts listed
+// under User Management in the developer dashboard.
+func (s *server) spotifyMember(r *http.Request, spotifyUserID, displayName string) (store.Member, error) {
+	ctx := r.Context()
+	existing, err := s.store.MemberBySpotifyID(ctx, spotifyUserID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return store.Member{}, err
+	}
+	current, signedIn := s.currentMember(r)
+	switch {
+	case err == nil && signedIn && existing.ID != current.ID:
+		return store.Member{}, &userError{http.StatusConflict, fmt.Sprintf(
+			"That Spotify account already belongs to %s. Sign out first to use it.", existing.DisplayName)}
+	case err == nil:
+		return existing, nil
+	case signedIn:
+		if current.SpotifyUserID != "" {
+			// Switching Spotify accounts: the old one's tokens go.
+			if err := s.store.DeleteSpotifyAccount(ctx, current.SpotifyUserID); err != nil {
+				return store.Member{}, err
+			}
+		}
+		if err := s.store.LinkSpotify(ctx, current.ID, spotifyUserID); err != nil {
+			return store.Member{}, err
+		}
+		return s.store.GetMember(ctx, current.ID)
+	default:
+		if displayName == "" {
+			displayName = spotifyUserID
+		}
+		return s.store.CreateMember(ctx, store.Member{DisplayName: displayName, SpotifyUserID: spotifyUserID})
+	}
+}
+
+// startSession signs the browser in as member.
+func (s *server) startSession(w http.ResponseWriter, r *http.Request, member store.Member) error {
+	session, err := s.store.CreateSession(r.Context(), member.ID, sessionTTL)
+	if err != nil {
+		return err
+	}
+	http.SetCookie(w, s.cookie(sessionCookie, session, sessionTTL))
+	return nil
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -148,26 +221,37 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleDisconnect deletes the signed-in user's stored Spotify tokens, as Spotify's developer
-// policy requires when a user disconnects.
+// handleDisconnect deletes the signed-in member's stored Spotify tokens, as Spotify's developer
+// policy requires when a user disconnects. They stay signed in, and signing in with Spotify again
+// reconnects it.
 func (s *server) handleDisconnect(w http.ResponseWriter, r *http.Request) {
-	userID := sessionFrom(r.Context()).SpotifyUserID
-	if err := s.store.DeleteSpotifyAccount(r.Context(), userID); err != nil {
+	member := memberFrom(r.Context())
+	if member.SpotifyUserID == "" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err := s.store.DeleteSpotifyAccount(r.Context(), member.SpotifyUserID); err != nil {
 		slog.Error("delete spotify account", "err", err)
 		writeError(w, http.StatusInternalServerError, "Couldn't disconnect your account.")
 		return
 	}
-	http.SetCookie(w, s.cookie(sessionCookie, "", -1))
-	slog.Info("spotify account disconnected", "user", userID)
+	slog.Info("spotify account disconnected", "user", member.SpotifyUserID, "member", member.ID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) redirectToApp(w http.ResponseWriter, r *http.Request, errMsg string) {
+	s.redirectToAppWith(w, r, "error", errMsg)
+}
+
+// redirectToAppWith sends the browser back to the app with a message for it to show: key is
+// "error" or "notice".
+func (s *server) redirectToAppWith(w http.ResponseWriter, r *http.Request, key, msg string) {
 	target := s.cfg.AppURL + "/"
-	if errMsg != "" {
-		target += "?error=" + url.QueryEscape(errMsg)
+	if msg != "" {
+		target += "?" + key + "=" + url.QueryEscape(msg)
 	}
-	http.Redirect(w, r, target, http.StatusFound)
+	// 303 so a redirect after Apple's form POST becomes a GET.
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (s *server) cookie(name, value string, maxAge time.Duration) *http.Cookie {
@@ -191,37 +275,51 @@ func (s *server) cookie(name, value string, maxAge time.Duration) *http.Cookie {
 
 // --- Sessions ---
 
-type sessionKey struct{}
+type memberKey struct{}
 
-func sessionFrom(ctx context.Context) store.Session {
-	sess, _ := ctx.Value(sessionKey{}).(store.Session)
-	return sess
+// memberFrom returns the signed-in member of a request that went through requireSession.
+func memberFrom(ctx context.Context) store.Member {
+	m, _ := ctx.Value(memberKey{}).(store.Member)
+	return m
 }
 
-func (s *server) currentSession(r *http.Request) (store.Session, bool) {
+func (s *server) currentMember(r *http.Request) (store.Member, bool) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil {
-		return store.Session{}, false
+		return store.Member{}, false
 	}
 	sess, err := s.store.GetSession(r.Context(), c.Value)
-	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			slog.Error("load session", "err", err)
+	if err == nil {
+		var m store.Member
+		if m, err = s.store.GetMember(r.Context(), sess.MemberID); err == nil {
+			return m, true
 		}
-		return store.Session{}, false
 	}
-	return sess, true
+	if !errors.Is(err, store.ErrNotFound) {
+		slog.Error("load session", "err", err)
+	}
+	return store.Member{}, false
 }
 
 func (s *server) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		sess, ok := s.currentSession(r)
+		member, ok := s.currentMember(r)
 		if !ok {
-			writeError(w, http.StatusUnauthorized, "Please connect your Spotify account first.")
+			writeError(w, http.StatusUnauthorized, "Please sign in first.")
 			return
 		}
-		next(w, r.WithContext(context.WithValue(r.Context(), sessionKey{}, sess)))
+		next(w, r.WithContext(context.WithValue(r.Context(), memberKey{}, member)))
 	}
+}
+
+func (s *server) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return s.requireSession(func(w http.ResponseWriter, r *http.Request) {
+		if !memberFrom(r.Context()).IsAdmin {
+			writeError(w, http.StatusForbidden, "Only the app's admin can do that.")
+			return
+		}
+		next(w, r)
+	})
 }
 
 // --- API ---
@@ -231,17 +329,36 @@ type accountJSON struct {
 	DisplayName string `json:"displayName"`
 }
 
+type memberJSON struct {
+	ID          int64  `json:"id"`
+	DisplayName string `json:"displayName"`
+	IsAdmin     bool   `json:"isAdmin"`
+}
+
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 	resp := struct {
-		Spotify *accountJSON `json:"spotify"`
-	}{}
-	if sess, ok := s.currentSession(r); ok {
-		acct, err := s.store.GetSpotifyAccount(r.Context(), sess.SpotifyUserID)
-		if err == nil {
-			resp.Spotify = &accountJSON{ID: acct.UserID, DisplayName: acct.DisplayName}
+		Member *memberJSON `json:"member"`
+		// Spotify is the member's connected Spotify account, if any.
+		Spotify         *accountJSON `json:"spotify"`
+		SignInWithApple bool         `json:"signInWithApple"`
+	}{SignInWithApple: s.appleID != nil}
+	if m, ok := s.currentMember(r); ok {
+		resp.Member = &memberJSON{ID: m.ID, DisplayName: m.DisplayName, IsAdmin: m.IsAdmin}
+		if m.SpotifyUserID != "" {
+			if acct, err := s.store.GetSpotifyAccount(r.Context(), m.SpotifyUserID); err == nil {
+				resp.Spotify = &accountJSON{ID: acct.UserID, DisplayName: acct.DisplayName}
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// memberAccountJSON names a member for display, e.g. who connected Apple Music.
+func (s *server) memberAccountJSON(r *http.Request, id int64) *accountJSON {
+	if m, err := s.store.GetMember(r.Context(), id); err == nil {
+		return &accountJSON{ID: strconv.FormatInt(m.ID, 10), DisplayName: m.DisplayName}
+	}
+	return &accountJSON{ID: strconv.FormatInt(id, 10), DisplayName: "a former member"}
 }
 
 func (s *server) handleListAccounts(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +380,7 @@ func (s *server) handleReadPlaylist(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := s.readPlaylist(r.Context(), sessionFrom(r.Context()).SpotifyUserID, playlistID)
+	result, err := s.readPlaylist(r.Context(), memberFrom(r.Context()).SpotifyUserID, playlistID)
 	if err != nil {
 		s.writeSpotifyError(w, playlistID, err)
 		return

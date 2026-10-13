@@ -1,4 +1,4 @@
-// Package store persists connected accounts and browser sessions in SQLite.
+// Package store persists members, connected accounts and browser sessions in SQLite.
 package store
 
 import (
@@ -23,7 +23,11 @@ type Store struct {
 	db *sql.DB
 }
 
-const schema = `
+// migrations[i] takes the database from user_version i to i+1. Databases made before versioning
+// are at 0 and already have the first migration's tables, which it creates only if missing.
+var migrations = []string{
+	// 1: Spotify accounts were the only identity.
+	`
 CREATE TABLE IF NOT EXISTS spotify_accounts (
 	spotify_user_id  TEXT PRIMARY KEY,
 	display_name     TEXT NOT NULL,
@@ -34,8 +38,6 @@ CREATE TABLE IF NOT EXISTS spotify_accounts (
 	updated_at       INTEGER NOT NULL
 );
 
--- The one Apple Music account translated playlists are created in. connected_by is the Spotify
--- user who connected it; only they can replace or disconnect it.
 CREATE TABLE IF NOT EXISTS apple_account (
 	id               INTEGER PRIMARY KEY CHECK (id = 1),
 	music_user_token TEXT NOT NULL,
@@ -63,7 +65,91 @@ CREATE TABLE IF NOT EXISTS sessions (
 	created_at      INTEGER NOT NULL,
 	expires_at      INTEGER NOT NULL
 );
-`
+`,
+	// 2: The app's own members. People sign in with Spotify or with Apple; sessions, the Apple
+	// Music connection and translations now point at a member. Every Spotify account (and any
+	// Spotify ID still referenced) becomes a member, and whoever connected Apple Music (else the
+	// first account) becomes the admin.
+	`
+CREATE TABLE members (
+	id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	display_name    TEXT NOT NULL,
+	is_admin        INTEGER NOT NULL DEFAULT 0,
+	spotify_user_id TEXT UNIQUE,
+	apple_sub       TEXT UNIQUE,
+	created_at      INTEGER NOT NULL
+);
+
+INSERT INTO members (display_name, spotify_user_id, created_at)
+	SELECT display_name, spotify_user_id, created_at FROM spotify_accounts ORDER BY created_at;
+INSERT INTO members (display_name, spotify_user_id, created_at)
+	SELECT DISTINCT id, id, CAST(strftime('%s', 'now') AS INTEGER) FROM (
+		SELECT connected_by AS id FROM apple_account UNION SELECT created_by FROM translations
+	) WHERE id NOT IN (SELECT spotify_user_id FROM members);
+UPDATE members SET is_admin = 1 WHERE id = COALESCE(
+	(SELECT m.id FROM members m JOIN apple_account a ON a.connected_by = m.spotify_user_id),
+	(SELECT MIN(id) FROM members));
+
+CREATE TABLE sessions_new (
+	token_hash TEXT PRIMARY KEY,
+	member_id  INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+	created_at INTEGER NOT NULL,
+	expires_at INTEGER NOT NULL
+);
+INSERT INTO sessions_new SELECT s.token_hash, m.id, s.created_at, s.expires_at
+	FROM sessions s JOIN members m ON m.spotify_user_id = s.spotify_user_id;
+DROP TABLE sessions;
+ALTER TABLE sessions_new RENAME TO sessions;
+
+-- The one Apple Music account translated playlists are created in. Only the member who
+-- connected it can replace or disconnect it.
+CREATE TABLE apple_account_new (
+	id               INTEGER PRIMARY KEY CHECK (id = 1),
+	music_user_token TEXT NOT NULL,
+	storefront       TEXT NOT NULL,
+	connected_by     INTEGER NOT NULL,
+	connected_at     INTEGER NOT NULL,
+	folder_id        TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO apple_account_new SELECT a.id, a.music_user_token, a.storefront, m.id, a.connected_at, a.folder_id
+	FROM apple_account a JOIN members m ON m.spotify_user_id = a.connected_by;
+DROP TABLE apple_account;
+ALTER TABLE apple_account_new RENAME TO apple_account;
+
+CREATE TABLE translations_new (
+	id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+	spotify_playlist_id TEXT NOT NULL,
+	name                TEXT NOT NULL,
+	apple_playlist_id   TEXT NOT NULL,
+	share_url           TEXT NOT NULL,
+	song_count          INTEGER NOT NULL,
+	created_by          INTEGER NOT NULL,
+	created_at          INTEGER NOT NULL
+);
+INSERT INTO translations_new SELECT t.id, t.spotify_playlist_id, t.name, t.apple_playlist_id, t.share_url,
+		t.song_count, m.id, t.created_at
+	FROM translations t JOIN members m ON m.spotify_user_id = t.created_by;
+DROP TABLE translations;
+ALTER TABLE translations_new RENAME TO translations;
+CREATE INDEX translations_by_playlist ON translations (spotify_playlist_id, created_at);
+
+-- Emails the admin has let in with Sign in with Apple. A row is removed once someone claims it.
+CREATE TABLE allowed_emails (
+	email        TEXT PRIMARY KEY,
+	display_name TEXT NOT NULL,
+	added_at     INTEGER NOT NULL
+);
+
+-- Sign in with Apple attempts whose email wasn't allowed, waiting for the admin.
+CREATE TABLE access_requests (
+	id           INTEGER PRIMARY KEY AUTOINCREMENT,
+	apple_sub    TEXT NOT NULL UNIQUE,
+	email        TEXT NOT NULL,
+	display_name TEXT NOT NULL,
+	requested_at INTEGER NOT NULL
+);
+`,
+}
 
 // Open opens (creating if needed) the SQLite database at path and applies the schema.
 func Open(path string) (*Store, error) {
@@ -77,9 +163,9 @@ func Open(path string) (*Store, error) {
 	}
 	// A handful of users never needs concurrent writers; one connection avoids SQLITE_BUSY.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate(db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("apply schema: %w", err)
+		return nil, err
 	}
 	// The database holds OAuth tokens, so keep it private to this user.
 	if err := os.Chmod(path, 0o600); err != nil {
@@ -90,6 +176,31 @@ func Open(path string) (*Store, error) {
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+func migrate(db *sql.DB) error {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	for ; version < len(migrations); version++ {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(migrations[version]); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migrate schema to version %d: %w", version+1, err)
+		}
+		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, version+1)); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("migrate schema to version %d: %w", version+1, err)
+		}
+	}
+	return nil
+}
 
 type SpotifyAccount struct {
 	UserID       string
@@ -150,7 +261,8 @@ func (s *Store) ListSpotifyAccounts(ctx context.Context) ([]SpotifyAccount, erro
 	return accounts, rows.Err()
 }
 
-// DeleteSpotifyAccount removes the account, its tokens, and (via cascade) its sessions.
+// DeleteSpotifyAccount removes the Spotify connection and its tokens. The member stays, and can
+// sign in with Spotify again to reconnect.
 func (s *Store) DeleteSpotifyAccount(ctx context.Context, userID string) error {
 	_, err := s.db.ExecContext(ctx, `DELETE FROM spotify_accounts WHERE spotify_user_id = ?`, userID)
 	return err
@@ -170,13 +282,13 @@ func scanSpotifyAccount(row scanner) (SpotifyAccount, error) {
 }
 
 type Session struct {
-	SpotifyUserID string
-	ExpiresAt     time.Time
+	MemberID  int64
+	ExpiresAt time.Time
 }
 
 // CreateSession returns a new random session token. Only its hash is stored, so a leaked
 // database can't be used to hijack sessions.
-func (s *Store) CreateSession(ctx context.Context, spotifyUserID string, ttl time.Duration) (string, error) {
+func (s *Store) CreateSession(ctx context.Context, memberID int64, ttl time.Duration) (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
@@ -184,8 +296,8 @@ func (s *Store) CreateSession(ctx context.Context, spotifyUserID string, ttl tim
 	token := base64.RawURLEncoding.EncodeToString(buf)
 	now := time.Now()
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO sessions (token_hash, spotify_user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`,
-		hashToken(token), spotifyUserID, now.Unix(), now.Add(ttl).Unix())
+		INSERT INTO sessions (token_hash, member_id, created_at, expires_at) VALUES (?, ?, ?, ?)`,
+		hashToken(token), memberID, now.Unix(), now.Add(ttl).Unix())
 	if err != nil {
 		return "", err
 	}
@@ -194,18 +306,16 @@ func (s *Store) CreateSession(ctx context.Context, spotifyUserID string, ttl tim
 
 func (s *Store) GetSession(ctx context.Context, token string) (Session, error) {
 	var sess Session
-	var userID sql.NullString
 	var expires int64
 	err := s.db.QueryRowContext(ctx, `
-		SELECT spotify_user_id, expires_at FROM sessions WHERE token_hash = ?`, hashToken(token)).
-		Scan(&userID, &expires)
+		SELECT member_id, expires_at FROM sessions WHERE token_hash = ?`, hashToken(token)).
+		Scan(&sess.MemberID, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return sess, ErrNotFound
 	}
 	if err != nil {
 		return sess, err
 	}
-	sess.SpotifyUserID = userID.String
 	sess.ExpiresAt = time.Unix(expires, 0)
 	if time.Now().After(sess.ExpiresAt) {
 		_ = s.DeleteSession(ctx, token)
@@ -227,7 +337,7 @@ func hashToken(token string) string {
 type AppleAccount struct {
 	MusicUserToken string
 	Storefront     string
-	ConnectedBy    string // Spotify user ID
+	ConnectedBy    int64 // member ID
 	ConnectedAt    time.Time
 	FolderID       string
 }
@@ -278,7 +388,7 @@ type Translation struct {
 	ApplePlaylistID   string
 	ShareURL          string
 	SongCount         int
-	CreatedBy         string // Spotify user ID
+	CreatedBy         int64 // member ID
 	CreatedAt         time.Time
 }
 

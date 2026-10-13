@@ -3,8 +3,8 @@
 A small private web app that turns Spotify playlists into Apple Music playlists for a group of friends.
 Project decisions and setup status live in `../playlist-translator-notes/project-overview.md`.
 
-- `server/`: Go backend (Spotify sign-in, playlist reading, Apple Music matching and playlist
-  creation, SQLite storage)
+- `server/`: Go backend (members who sign in with Spotify or Apple, playlist reading, Apple Music
+  matching and playlist creation, SQLite storage)
 - `web/`: React + Vite + TypeScript frontend
 
 ## Local development
@@ -24,6 +24,19 @@ APPLE_TEAM_ID=...
 APPLE_KEY_ID=...
 APPLE_PRIVATE_KEY_PATH=../../shh/AuthKey_<KeyID>.p8
 ```
+
+`signin-apple.env` (optional; without it people can only sign in with Spotify), plus the Sign in
+with Apple key it points to. It also needs `APPLE_TEAM_ID` from `apple.env`:
+
+```
+SIGN_IN_WITH_APPLE_SERVICES_ID=...
+SIGN_IN_WITH_APPLE_KEY_ID=...
+SIGN_IN_WITH_APPLE_KEY_PATH=../../shh/AuthKey_<KeyID>.p8
+```
+
+Apple only returns to a real domain name, not `127.0.0.1` or `localhost`, so Sign in with Apple
+can only be tried on the Pi's public URL; leave this file out of local runs. The first person to
+sign in with Spotify on a new database becomes the admin.
 
 The Spotify app's redirect URI must include `http://127.0.0.1:8080/callback`. Use `127.0.0.1`, not
 `localhost`; Spotify rejects `localhost`.
@@ -79,3 +92,4 @@ The one-time Pi setup scripts and systemd units are in `deploy/pi/`. Setup notes
 | `BASE_URL` | `http://<addr>` | Public URL of the server; Spotify redirects to `BASE_URL/callback` |
 | `APP_URL` | `BASE_URL` | Where the browser goes after sign-in (the Vite server in dev) |
 | `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY_PATH` | _(none)_ | MusicKit key for Apple Music; all three or none |
+| `SIGN_IN_WITH_APPLE_SERVICES_ID`, `SIGN_IN_WITH_APPLE_KEY_ID`, `SIGN_IN_WITH_APPLE_KEY_PATH` | _(none)_ | Sign in with Apple (Services ID and its key; uses `APPLE_TEAM_ID`); all three or none. Apple returns to `BASE_URL/auth/apple/callback` |

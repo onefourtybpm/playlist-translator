@@ -89,11 +89,6 @@ a {
   color: var(--text);
 }
 
-.service-spotify {
-  color: var(--spotify);
-  font-weight: 600;
-}
-
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -112,6 +107,29 @@ a {
 .signin p {
   margin: 0;
   max-width: 52ch;
+}
+
+.signin-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.signin-buttons .button {
+  min-width: 240px;
+  text-align: center;
+}
+
+.apple-id {
+  display: inline-block;
+  line-height: 0;
+  border-radius: 999px;
+}
+
+.apple-id img {
+  display: block;
+  width: 240px;
+  height: 44px;
 }
 
 .muted {
@@ -183,6 +201,107 @@ a {
 .banner.error {
   background: var(--error-bg);
   color: var(--danger);
+}
+
+.banner.info {
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.spotify-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.spotify-status {
+  margin: 0;
+}
+
+.spotify-status p {
+  margin: 0 0 12px;
+  max-width: 70ch;
+}
+
+.spotify-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--spotify);
+  vertical-align: 1px;
+}
+
+.admin h2 {
+  font-size: 1.15rem;
+}
+
+.admin-block {
+  margin-top: 20px;
+}
+
+.admin-block h3 {
+  font-size: 1rem;
+  margin-bottom: 8px;
+}
+
+.admin-block > p {
+  margin: 0 0 8px;
+  max-width: 70ch;
+}
+
+.admin-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.admin-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-who {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.text-input {
+  font: inherit;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--text);
+  min-width: 0;
+}
+
+.button.small-button {
+  padding: 6px 16px;
+}
+
+.allow-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.allow-form .text-input {
+  flex: 1 1 180px;
 }
 
 .connected {

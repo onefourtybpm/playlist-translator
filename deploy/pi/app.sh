@@ -3,6 +3,8 @@
 # Inputs, copied to your home folder on the Pi first (each is optional on a re-run):
 #   ~/spotify.env                       SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
 #   ~/apple.env + ~/AuthKey_<KeyID>.p8  APPLE_TEAM_ID, APPLE_KEY_ID, and the MusicKit private key
+#   ~/signin-apple.env + ~/AuthKey_<KeyID>.p8
+#                                       SIGN_IN_WITH_APPLE_SERVICES_ID, SIGN_IN_WITH_APPLE_KEY_ID, and that key
 #   ~/systemd/                          the unit files from deploy/pi/systemd
 #   ~/backup-db.sh                      the nightly backup script
 # Settings without a new input file are kept from the existing env file. Input files are deleted once used.
@@ -39,20 +41,37 @@ if [[ -f $home/apple.env ]]; then
   [[ -n $key_id && -f $key_src ]] || { echo "~/apple.env needs APPLE_KEY_ID and a matching ~/AuthKey_<KeyID>.p8" >&2; exit 1; }
   key_dst=$conf/AuthKey_$key_id.p8
   install -o root -g playlist -m 640 "$key_src" "$key_dst"
-  find "$conf" -name 'AuthKey_*.p8' ! -name "AuthKey_$key_id.p8" -delete
   # The Mac's apple.env has a relative dev path for the key, so the Pi path replaces it.
   apple=$(grep -E '^APPLE_(TEAM_ID|KEY_ID)=' "$home/apple.env"; echo "APPLE_PRIVATE_KEY_PATH=$key_dst")
 else
   apple=$(keep 'APPLE_(TEAM_ID|KEY_ID|PRIVATE_KEY_PATH)')
 fi
 
+if [[ -f $home/signin-apple.env ]]; then
+  siwa_key_id=$(sed -n 's/^SIGN_IN_WITH_APPLE_KEY_ID=//p' "$home/signin-apple.env")
+  siwa_src=$home/AuthKey_$siwa_key_id.p8
+  [[ -n $siwa_key_id && -f $siwa_src ]] || { echo "~/signin-apple.env needs SIGN_IN_WITH_APPLE_KEY_ID and a matching ~/AuthKey_<KeyID>.p8" >&2; exit 1; }
+  siwa_dst=$conf/AuthKey_$siwa_key_id.p8
+  install -o root -g playlist -m 640 "$siwa_src" "$siwa_dst"
+  siwa=$(grep -E '^SIGN_IN_WITH_APPLE_(SERVICES_ID|KEY_ID)=' "$home/signin-apple.env"; echo "SIGN_IN_WITH_APPLE_KEY_PATH=$siwa_dst")
+else
+  siwa=$(keep 'SIGN_IN_WITH_APPLE_(SERVICES_ID|KEY_ID|KEY_PATH)')
+fi
+
 base_url="https://$(tailscale status --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))')"
 (
   umask 077
-  { echo "$spotify"; if [[ -n $apple ]]; then echo "$apple"; fi; echo "BASE_URL=$base_url"; } > "$env_file.new"
+  { echo "$spotify"; for part in "$apple" "$siwa"; do if [[ -n $part ]]; then echo "$part"; fi; done
+    echo "BASE_URL=$base_url"; } > "$env_file.new"
 )
 mv "$env_file.new" "$env_file"
-rm -f "$home/spotify.env" "$home/apple.env" "$home"/AuthKey_*.p8
+# Keys the settings no longer point at are old ones; remove them.
+for key in "$conf"/AuthKey_*.p8; do
+  if [[ -e $key ]] && ! grep -qxF "$key" <(sed -n 's/^[A-Z_]*_KEY_PATH=//p' "$env_file"); then
+    rm -f "$key"
+  fi
+done
+rm -f "$home/spotify.env" "$home/apple.env" "$home/signin-apple.env" "$home"/AuthKey_*.p8
 echo "Wrote $env_file with: $(cut -d= -f1 "$env_file" | paste -sd' ' -)"
 
 echo "=== Backup folder /var/backups/playlist-translator (readable by $deployer to copy off the Pi)"

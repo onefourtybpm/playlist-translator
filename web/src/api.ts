@@ -3,8 +3,42 @@ export type Account = {
   displayName: string
 }
 
+export type Member = {
+  id: number
+  displayName: string
+  isAdmin: boolean
+}
+
 export type Me = {
+  member: Member | null
+  // The signed-in member's connected Spotify account, if any.
   spotify: Account | null
+  signInWithApple: boolean
+}
+
+export type AdminMember = Member & {
+  // Which ways this member signs in.
+  spotify: boolean
+  apple: boolean
+}
+
+export type AllowedEmail = {
+  email: string
+  displayName: string
+}
+
+export type AccessRequest = {
+  id: number
+  email: string
+  displayName: string
+  requestedAt: string
+}
+
+export type AdminView = {
+  members: AdminMember[]
+  allowedEmails: AllowedEmail[]
+  requests: AccessRequest[]
+  signInWithApple: boolean
 }
 
 export type Playlist = {
@@ -137,7 +171,24 @@ export const api = {
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
   disconnect: () => request<void>('/api/spotify/account', { method: 'DELETE' }),
   appleDeveloperToken: () => request<{ token: string }>('/api/apple/developer-token'),
+  admin: () => request<AdminView>('/api/admin'),
+  allowEmail: (email: string, displayName: string) =>
+    request<AdminView>('/api/admin/allowed-emails', {
+      method: 'POST',
+      body: JSON.stringify({ email, displayName }),
+    }),
+  removeAllowedEmail: (email: string) =>
+    request<AdminView>(`/api/admin/allowed-emails/${encodeURIComponent(email)}`, { method: 'DELETE' }),
+  approveRequest: (id: number, displayName: string) =>
+    request<AdminView>(`/api/admin/requests/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ displayName }),
+    }),
+  denyRequest: (id: number) => request<AdminView>(`/api/admin/requests/${id}`, { method: 'DELETE' }),
+  removeMember: (id: number) => request<AdminView>(`/api/admin/members/${id}`, { method: 'DELETE' }),
 }
 
-// Full-page navigation, not fetch: the server redirects the browser to Spotify's sign-in page.
+// Full-page navigations, not fetch: the server redirects the browser to Spotify's or Apple's
+// sign-in page.
 export const spotifyLoginUrl = '/auth/spotify/login'
+export const appleSignInUrl = '/auth/apple/login'
