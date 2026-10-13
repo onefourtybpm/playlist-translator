@@ -247,8 +247,8 @@ func (s *Store) GetAppleAccount(ctx context.Context) (AppleAccount, error) {
 	return a, err
 }
 
-// SetAppleAccount connects (or reconnects) the Apple Music account. Reconnecting keeps the
-// playlist folder, since it's in the same library.
+// SetAppleAccount connects (or reconnects) the Apple Music account, keeping the saved playlist
+// folder; callers clear it with SetAppleFolder if it isn't in the newly connected library.
 func (s *Store) SetAppleAccount(ctx context.Context, a AppleAccount) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO apple_account (id, music_user_token, storefront, connected_by, connected_at)

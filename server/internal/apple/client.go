@@ -212,6 +212,17 @@ func (c *Client) CreateFolder(ctx context.Context, userToken, name string) (stri
 	return resp.Data[0].ID, nil
 }
 
+// FolderExists reports whether a playlist folder is in the user's library. A folder ID from
+// another account's library, or one deleted in the Music app, isn't.
+func (c *Client) FolderExists(ctx context.Context, userToken, id string) (bool, error) {
+	err := c.do(ctx, http.MethodGet, "/v1/me/library/playlist-folders/"+url.PathEscape(id), userToken, nil, nil)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // LibraryPlaylist is a playlist in the user's library. GlobalID (pl.u-…) is set for public
 // playlists and is what share links use.
 type LibraryPlaylist struct {

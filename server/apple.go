@@ -132,6 +132,19 @@ func (s *server) handleAppleConnect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, msg)
 		return
 	}
+	// The saved "Playlist Translator" folder belongs to whichever library it was made in. If the
+	// newly connected account is a different one (or the folder was deleted), forget it so the
+	// next playlist goes in a fresh folder in this library.
+	keepFolder := true
+	if prev, err := s.store.GetAppleAccount(r.Context()); err == nil && prev.FolderID != "" {
+		exists, err := s.apple.FolderExists(r.Context(), req.MusicUserToken, prev.FolderID)
+		if err != nil {
+			// Creating a playlist recovers from a missing folder too, so this isn't fatal.
+			slog.Warn("check apple playlist folder", "folder", prev.FolderID, "err", err)
+		}
+		keepFolder = exists || err != nil
+	}
+
 	userID := sessionFrom(r.Context()).SpotifyUserID
 	err = s.store.SetAppleAccount(r.Context(), store.AppleAccount{
 		MusicUserToken: req.MusicUserToken,
@@ -139,12 +152,15 @@ func (s *server) handleAppleConnect(w http.ResponseWriter, r *http.Request) {
 		ConnectedBy:    userID,
 		ConnectedAt:    time.Now(),
 	})
+	if err == nil && !keepFolder {
+		err = s.store.SetAppleFolder(r.Context(), "")
+	}
 	if err != nil {
 		slog.Error("save apple account", "err", err)
 		writeError(w, http.StatusInternalServerError, "Couldn't save the Apple Music connection.")
 		return
 	}
-	slog.Info("apple music connected", "by", userID, "storefront", storefront)
+	slog.Info("apple music connected", "by", userID, "storefront", storefront, "kept_folder", keepFolder)
 	s.handleAppleStatus(w, r)
 }
 

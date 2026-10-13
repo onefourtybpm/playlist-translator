@@ -20,11 +20,14 @@ import (
 	"github.com/onefourtybpm/playlist-translator/server/internal/store"
 )
 
-// fakeApple accepts the music user token "good" and records library changes.
+// fakeApple accepts the music user tokens "good" and "friend" (two different libraries) and
+// records library changes.
 type fakeApple struct {
 	mu              sync.Mutex
 	folders         []string
+	folderOwner     map[string]string // folder ID → user token of the library it's in
 	deletedFolders  map[string]bool
+	createAttempts  int
 	createdParents  []string
 	createdNames    []string
 	createdSongs    [][]string
@@ -33,12 +36,12 @@ type fakeApple struct {
 
 func newFakeApple(t *testing.T) (*fakeApple, *apple.Client) {
 	t.Helper()
-	f := &fakeApple{deletedFolders: map[string]bool{}}
+	f := &fakeApple{deletedFolders: map[string]bool{}, folderOwner: map[string]string{}}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		userToken := r.Header.Get("Music-User-Token")
-		if strings.HasPrefix(r.URL.Path, "/v1/me/") && userToken != "good" {
+		if strings.HasPrefix(r.URL.Path, "/v1/me/") && userToken != "good" && userToken != "friend" {
 			w.WriteHeader(http.StatusForbidden)
 			fmt.Fprint(w, `{"errors":[{"code":"40300","detail":"Invalid authentication"}]}`)
 			return
@@ -59,17 +62,27 @@ func newFakeApple(t *testing.T) (*fakeApple, *apple.Client) {
 			// Spotify's fake playlist has one song, ISRC "USX".
 			fmt.Fprint(w, `{"data":[{"id":"111","attributes":{"name":"Song","artistName":"Artist","albumName":"Album","isrc":"USX"}}],
 				"meta":{"filters":{"isrc":{"USX":[{"id":"111"}]}}}}`)
+		case strings.HasPrefix(r.URL.Path, "/v1/me/library/playlist-folders/"):
+			id := strings.TrimPrefix(r.URL.Path, "/v1/me/library/playlist-folders/")
+			if f.folderOwner[id] != userToken || f.deletedFolders[id] {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"errors":[{"code":"40400"}]}`)
+				return
+			}
+			fmt.Fprintf(w, `{"data":[{"id":%q}]}`, id)
 		case r.URL.Path == "/v1/me/library/playlist-folders":
 			id := fmt.Sprintf("p.folder%d", len(f.folders)+1)
 			f.folders = append(f.folders, id)
+			f.folderOwner[id] = userToken
 			w.WriteHeader(http.StatusCreated)
 			fmt.Fprintf(w, `{"data":[{"id":%q}]}`, id)
 		case r.URL.Path == "/v1/me/library/playlists":
+			f.createAttempts++
 			parent := ""
 			if len(body.Relationships.Parent.Data) > 0 {
 				parent = body.Relationships.Parent.Data[0].ID
 			}
-			if f.deletedFolders[parent] {
+			if parent != "" && (f.deletedFolders[parent] || f.folderOwner[parent] != userToken) {
 				w.WriteHeader(http.StatusNotFound)
 				fmt.Fprint(w, `{"errors":[{"code":"40400","detail":"Parent not found"}]}`)
 				return
@@ -222,5 +235,41 @@ func TestCreateReportsExpiredAppleConnection(t *testing.T) {
 	code := call(t, srv, "bob", "POST", "/api/translate", `{"link":"bobsplaylist12345678ab","songIds":["111"]}`, &resp)
 	if code != http.StatusBadGateway || !strings.Contains(resp.Error, "BOB needs to connect Apple Music again") {
 		t.Errorf("status %d, error %q", code, resp.Error)
+	}
+}
+
+func TestSwitchingAppleAccountsStartsNewFolder(t *testing.T) {
+	srv := newTestServer(t, newFakeSpotify(t, map[string]fakePlaylist{"bobsplaylist12345678ab": {owner: "bob", public: true}}), account("bob", time.Hour))
+	fake, client := newFakeApple(t)
+	srv.apple = client
+	create := func() {
+		t.Helper()
+		if code := call(t, srv, "bob", "POST", "/api/translate", `{"link":"bobsplaylist12345678ab","songIds":["111"]}`, nil); code != http.StatusCreated {
+			t.Fatalf("create: status %d", code)
+		}
+	}
+
+	call(t, srv, "bob", "PUT", "/api/apple/connection", `{"musicUserToken":"good"}`, nil)
+	create()
+	// Reconnecting the same account keeps its folder.
+	call(t, srv, "bob", "PUT", "/api/apple/connection", `{"musicUserToken":"good"}`, nil)
+	create()
+	// Switching to the friend's account forgets the old folder instead of trying it first.
+	call(t, srv, "bob", "DELETE", "/api/apple/connection", "", nil)
+	call(t, srv, "bob", "PUT", "/api/apple/connection", `{"musicUserToken":"friend"}`, nil)
+	create()
+	// Reconnecting straight to a different account (no disconnect) does the same.
+	call(t, srv, "bob", "PUT", "/api/apple/connection", `{"musicUserToken":"good"}`, nil)
+	create()
+
+	// Creating would recover from a stale folder by retrying, so check no attempt was wasted on one.
+	if fake.createAttempts != 4 {
+		t.Errorf("create attempts = %d, want 4 (none against the other library's folder)", fake.createAttempts)
+	}
+	if got := fmt.Sprint(fake.createdParents); got != "[p.folder1 p.folder1 p.folder2 p.folder3]" {
+		t.Errorf("parents = %s", got)
+	}
+	if fake.folderOwner["p.folder2"] != "friend" || fake.folderOwner["p.folder3"] != "good" {
+		t.Errorf("folder owners = %v", fake.folderOwner)
 	}
 }
