@@ -83,7 +83,7 @@ export default function AppleConnection({ status, onChange }: Props) {
           </p>
           {reconnectBy && (
             <p className={reconnectSoon ? 'warn' : 'muted'}>
-              Apple’s connection lasts about six months; reconnect by around {formatDate(reconnectBy)}.
+              Apple’s connection lasts about six months; reconnect by {formatDate(reconnectBy)}.
             </p>
           )}
           {status.canManage && (
