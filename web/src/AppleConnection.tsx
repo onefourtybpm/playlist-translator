@@ -106,8 +106,8 @@ export default function AppleConnection({ status, onChange }: Props) {
             (switching ? (
               <div className="switch-apple">
                 <p>
-                  New playlists will go in your Apple Music library instead, in a new “Playlist Translator”
-                  folder, and you’ll manage the connection. Playlists already made stay in{' '}
+                  New playlists will go in your Apple Music library instead, in a new (or existing) “Playlist
+                  Translator” folder, and you’ll manage the connection. Playlists already made stay in{' '}
                   {status.connectedBy?.displayName}’s library, and their links keep working.
                 </p>
                 <div className="apple-actions">
