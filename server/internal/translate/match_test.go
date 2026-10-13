@@ -3,6 +3,7 @@ package translate
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/onefourtybpm/playlist-translator/server/internal/apple"
@@ -10,10 +11,12 @@ import (
 )
 
 type fakeCatalog struct {
-	byISRC   map[string][]apple.Song
-	search   map[string][]apple.Song // keyed by search term
+	byISRC map[string][]apple.Song
+	search map[string][]apple.Song // keyed by search term
+	err    error
+
+	mu       sync.Mutex // Match searches concurrently
 	searches []string
-	err      error
 }
 
 func (f *fakeCatalog) SongsByISRC(_ context.Context, _ string, isrcs []string) (map[string][]apple.Song, error) {
@@ -27,7 +30,9 @@ func (f *fakeCatalog) SongsByISRC(_ context.Context, _ string, isrcs []string) (
 }
 
 func (f *fakeCatalog) SearchSongs(_ context.Context, _, term string, _ int) ([]apple.Song, error) {
+	f.mu.Lock()
 	f.searches = append(f.searches, term)
+	f.mu.Unlock()
 	return f.search[term], f.err
 }
 

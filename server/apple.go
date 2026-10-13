@@ -311,9 +311,20 @@ func (s *server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One at a time, so a double-click can't create two playlists or two folders.
+	// One at a time, so a double-click can't create two playlists or two folders. Reload the
+	// account once it's our turn: the request before us may have just created the folder.
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
+	acct, err = s.store.GetAppleAccount(ctx)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusConflict, "Apple Music isn't connected yet.")
+		return
+	}
+	if err != nil {
+		slog.Error("load apple account", "err", err)
+		writeError(w, http.StatusInternalServerError, "Couldn't load the Apple Music connection.")
+		return
+	}
 
 	pl, err := s.createApplePlaylist(r, acct, apple.NewPlaylist{
 		Name:        meta.Name,
